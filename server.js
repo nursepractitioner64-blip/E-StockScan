@@ -4,7 +4,6 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const { google } = require("googleapis");
-const { buildCountRows } = require("./countSession");
 
 const app = express();
 
@@ -203,18 +202,20 @@ app.post("/api/count", async (req, res) => {
       "SESSION_ID","MOVEMENT_ID","CODE","NAME","QTY","USER","TIME"
     ]);
 
-    const items = Array.isArray(req.body) ? req.body : [req.body];
-    const rows = buildCountRows(items);
-
-    if (!rows.length) {
-      return res.status(400).json({
-        success: false,
-        error: "ไม่มีรายการตรวจที่ถูกต้อง"
-      });
-    }
+    const items = req.body || [];
 
     const client = await auth.getClient();
     const sheets = google.sheets({ version: "v4", auth: client });
+
+    const rows = items.map(i => ([
+      i.session_id,
+      i.movement_id,
+      i.code,
+      i.name,
+      i.qty,
+      i.user,
+      new Date().toISOString(),
+    ]));
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
@@ -223,7 +224,7 @@ app.post("/api/count", async (req, res) => {
       requestBody: { values: rows },
     });
 
-    res.json({ success: true, saved: rows.length });
+    res.json({ success: true });
 
   } catch (err) {
     console.error(err);

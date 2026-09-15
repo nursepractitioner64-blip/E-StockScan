@@ -23,31 +23,35 @@ export async function getMovement(code) {
  * บันทึกรายการทั้งหมด
  * @param {Array} items
  */
-export async function saveMovement(item) {
+export async function saveMovements(items = []) {
 
-  if (!item || !item.session_id || !item.movement_id || !item.code || Number(item.qty) <= 0) {
-    throw new Error("ข้อมูลรายการตรวจไม่ครบ");
+  if (!Array.isArray(items) || !items.length) {
+    throw new Error("ไม่มีข้อมูลสำหรับบันทึก");
   }
 
   try {
+
     const res = await fetch("/api/count", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(item)
+      body: JSON.stringify(items)
     });
 
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || "บันทึกข้อมูลไม่สำเร็จ");
+    if (!res.ok) {
+      throw new Error("บันทึกข้อมูลไม่สำเร็จ");
     }
 
-    return data;
+    return await res.json();
+
   } catch (err) {
-    console.error("SAVE MOVEMENT:", err);
-    throw new Error(err.message || "บันทึกข้อมูลไม่สำเร็จ");
+
+    console.error("SAVE MOVEMENTS:", err);
+
+    throw new Error(
+      err.message || "บันทึกข้อมูลไม่สำเร็จ"
+    );
   }
 }
 

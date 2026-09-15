@@ -3,7 +3,7 @@
 ========================================= */
 
 import {
-  saveMovement,
+  saveMovements,
   closeMovementSession
 } from "../modules/movement.js";
 
@@ -145,11 +145,10 @@ function renderPreview() {
       </div>
 
       <button
-        id="btnConfirmItem"
         class="btn-success"
         onclick="confirmItem()">
 
-        ✓ ยืนยันและบันทึกการตรวจ
+        Confirm
 
       </button>
 
@@ -175,7 +174,7 @@ window.changePreviewQty = step => {
    CONFIRM ITEM
 ========================================= */
 
-window.confirmItem = async () => {
+window.confirmItem = () => {
 
   if (!currentItem) return;
 
@@ -183,60 +182,30 @@ window.confirmItem = async () => {
     document.getElementById("previewQty")?.value || 1
   );
 
-  if (!Number.isFinite(currentItem.qty) || currentItem.qty < 1) {
-    return Swal.fire({
-      icon: "warning",
-      title: "จำนวนไม่ถูกต้อง"
-    });
-  }
+  const found = items.find(
+    i => i.movement_id === currentItem.movement_id
+  );
 
-  const itemToSave = { ...currentItem };
-  const button = document.getElementById("btnConfirmItem");
+  if (found)
+    found.qty += currentItem.qty;
 
-  try {
-    if (button) {
-      button.disabled = true;
-      button.textContent = "กำลังบันทึก...";
-    }
+  else
+    items.push({ ...currentItem });
 
-    await saveMovement(itemToSave);
+  currentItem = null;
 
-    const found = items.find(
-      i => i.movement_id === itemToSave.movement_id
-    );
+  renderPreview();
+  renderList();
+  renderInfo();
 
-    if (found)
-      found.qty += itemToSave.qty;
-    else
-      items.push(itemToSave);
-
-    currentItem = null;
-
-    renderPreview();
-    renderList();
-    renderInfo();
-
-    Swal.fire({
-      toast: true,
-      position: "top",
-      timer: 1000,
-      showConfirmButton: false,
-      icon: "success",
-      title: "บันทึกลง COUNT_SESSION แล้ว"
-    });
-
-  } catch (err) {
-    if (button) {
-      button.disabled = false;
-      button.textContent = "✓ ยืนยันและบันทึกการตรวจ";
-    }
-
-    Swal.fire({
-      icon: "error",
-      title: "บันทึกไม่สำเร็จ",
-      text: err.message
-    });
-  }
+  Swal.fire({
+    toast: true,
+    position: "top",
+    timer: 1000,
+    showConfirmButton: false,
+    icon: "success",
+    title: "เพิ่มรายการแล้ว"
+  });
 };
 
 /* =========================================
@@ -344,16 +313,14 @@ async function closeSession() {
       didOpen: () => Swal.showLoading()
     });
 
+    await saveMovements(items);
     await closeMovementSession(session_id);
 
     resetSession();
 
     Swal.fire({
       icon: "success",
-      title: "ปิดรอบตรวจสำเร็จ",
-      text: "รายการที่ยืนยันถูกบันทึกใน COUNT_SESSION แล้ว"
-    }).then(() => {
-      window.location.href = "/";
+      title: "บันทึกสำเร็จ"
     });
 
   } catch (err) {
