@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>Emergency Check List</title>
+
+  <link rel="icon" href="/icon.png">
+  <link rel="stylesheet" href="./style.css">
+
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+
+<body>
+
+  <main class="container">
+
+    <header class="header">
+      🚑 Emergency Check List
+    </header>
+
+    <section id="info" class="info-card">
+
+      <div>
+        Session :
+        <span id="sessionId">-</span>
+      </div>
+
+      <div>
+        User :
+        <span id="userName">-</span>
+      </div>
+
+      <div>
+        Total :
+        <span id="totalItems">0</span>
+      </div>
+
+    </section>
+
+    <!-- Scanner -->
+    <section id="reader"></section>
+
+    <!-- Preview Card -->
+    <section id="preview"></section>
+
+    <!-- Current List -->
+    <section id="list">
+
+      <div class="empty">
+        ยังไม่มีรายการที่สแกน
+      </div>
+
+    </section>
+
+    <div class="actions">
+
+      <button id="btnSendAll" class="btn-success">
+        ✅ ส่งรายการทั้งหมด
+      </button>
+
+      <button id="btnClear" class="btn-danger">
+        🗑️ เริ่มรอบใหม่
+      </button>
+
+    </div>
+
+  </main>
+
+  <script
+    type="module"
+    src="./views/session.view.js">
+  </script>
+
+</body>
+</html>

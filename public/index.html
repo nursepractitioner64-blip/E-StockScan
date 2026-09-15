@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emergency Check List</title>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body style="font-family:Prompt;background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh">
+
+<div style="background:#1e293b;padding:25px;border-radius:16px;width:320px">
+
+  <h2 style="text-align:center">🚑 Emergency Check List</h2>
+
+<label style="font-size:12px;color:#cbd5e1;display:block;margin-bottom:6px">
+  เลือกผู้ใช้งาน
+</label>
+
+<select id="user"
+  style="width:100%;padding:10px;font-size:16px;border-radius:8px;border:none;margin-bottom:12px">
+</select>
+
+  <button onclick="start()"
+    style="width:100%;margin-top:15px;padding:10px;border:none;border-radius:8px;background:#22c55e;font-weight:bold">
+
+    ▶ Start Check List
+
+  </button>
+
+</div>
+
+<script>
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  const el = document.getElementById("user");
+
+  fetch("/api/users")
+    .then(r => r.json())
+    .then(users => {
+
+      if (!users.length) {
+        el.innerHTML = `<option>NO USERS</option>`;
+        return;
+      }
+
+      el.innerHTML = users.map(u =>
+        `<option value="${u}">${u}</option>`
+      ).join("");
+    })
+    .catch(err => {
+      console.error(err);
+      el.innerHTML = `<option>LOAD FAIL</option>`;
+    });
+
+});
+
+function start() {
+
+  const user = document.getElementById("user").value;
+
+  if (!user) return Swal.fire({
+  icon: 'warning',
+  title: 'กรุณาเลือกผู้ใช้งาน'
+});
+
+  fetch("/api/session/new")
+    .then(r => r.json())
+    .then(data => {
+
+      const sid = data.session_id;
+
+      window.location.href =
+        `/session.html?sid=${sid}&user=${encodeURIComponent(user)}`;
+    });
+}
+
+</script>
+<script type="module" src="views/index.view.js"></script>
+</body>
+</html>
