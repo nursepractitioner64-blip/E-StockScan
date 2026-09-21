@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Management - Emergency Check List</title>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link rel="stylesheet" href="/admin-users.css">
+</head>
+<body>
+  <main class="um-page">
+    <section class="um-card">
+      <header class="um-header">
+        <div>
+          <div class="um-eyebrow">EMERGENCY CHECK LIST</div>
+          <h1>👥 User Management</h1>
+          <p>จัดการผู้สมัคร อนุมัติ และควบคุมสถานะบัญชีผู้ใช้งาน</p>
+        </div>
+        <button id="backBtn" class="um-btn secondary">← กลับ</button>
+      </header>
+
+      <section class="um-toolbar">
+        <input id="searchInput" placeholder="ค้นหา ชื่อ / Username / Email / โทรศัพท์">
+        <select id="statusFilter">
+          <option value="">ทุกสถานะ</option>
+          <option value="Pending">Pending</option>
+          <option value="Active">Active</option>
+          <option value="Rejected">Rejected</option>
+          <option value="Inactive">Inactive</option>
+        </select>
+        <button id="refreshBtn" class="um-btn primary">↻ Refresh</button>
+      </section>
+
+      <div id="pageMessage" class="um-message"></div>
+      <div class="um-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ชื่อไทย</th>
+              <th>ชื่ออังกฤษ</th>
+              <th>Username</th>
+              <th>ตำแหน่ง</th>
+              <th>การจ้างงาน</th>
+              <th>โทรศัพท์</th>
+              <th>Email</th>
+              <th>สถานะ</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody">
+            <tr><td colspan="9" class="empty">กำลังโหลด...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+async function api(url, options = {}) {
+  const res = await fetch(url, {
+    credentials: "include",
+    ...options,
+    headers: { "Content-Type":"application/json", ...(options.headers || {}) }
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) {
+    const err = new Error(data.message || "เกิดข้อผิดพลาด");
+    err.status = res.status;
+    err.code = data.code;
+    throw err;
+  }
+  return data;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, char => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;"
+  })[char]);
+}
+
+function statusClass(status) {
+  return `status-${String(status || "").toLowerCase()}`;
+}
+
+function actionButtons(user) {
+  const id = encodeURIComponent(user.USER_ID);
+  const status = String(user.STATUS || "");
+  if (status === "Pending") {
+    return `<button class="action approve" data-action="approve" data-id="${id}">✓ Approve</button><button class="action reject" data-action="reject" data-id="${id}">✕ Reject</button>`;
+  }
+  if (status === "Active") {
+    return `<button class="action deactivate" data-action="deactivate" data-id="${id}">⏸ Deactivate</button>`;
+  }
+  return `<button class="action activate" data-action="activate" data-id="${id}">✓ Activate</button>`;
+}
+
+function renderUsers(users) {
+  if (!users.length) {
+    $("usersBody").innerHTML = `<tr><td colspan="9" class="empty">ไม่พบผู้ใช้งาน</td></tr>`;
+    return;
+  }
+
+  $("usersBody").innerHTML = users.map(user => `
+    <tr>
+      <td><strong>${escapeHtml(user.FULL_NAME_TH)}</strong></td>
+      <td>${escapeHtml(user.FULL_NAME_EN)}</td>
+      <td><code>${escapeHtml(user.USERNAME)}</code></td>
+      <td>${escapeHtml(user.POSITION)}</td>
+      <td>${escapeHtml(user.EMPLOYMENT_TYPE)}</td>
+      <td>${escapeHtml(user.PHONE)}</td>
+      <td>${escapeHtml(user.EMAIL)}</td>
+      <td><span class="status ${statusClass(user.STATUS)}">${escapeHtml(user.STATUS)}</span></td>
+      <td class="actions">${actionButtons(user)}</td>
+    </tr>
+  `).join("");
+}
+
+async function loadUsers() {
+  $("pageMessage").textContent = "กำลังโหลดข้อมูล...";
+  const params = new URLSearchParams();
+  const q = $("searchInput").value.trim();
+  const status = $("statusFilter").value;
+  if (q) params.set("q", q);
+  if (status) params.set("status", status);
+
+  try {
+    const data = await api(`/api/admin/users?${params.toString()}`);
+    renderUsers(data.users || []);
+    $("pageMessage").textContent = `พบ ${data.users.length} รายการ`;
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) {
+      await Swal.fire({ icon:"warning", title:"ไม่มีสิทธิ์เข้าใช้งาน", text:err.message, confirmButtonText:"กลับ Login" });
+      window.location.href = "/";
+      return;
+    }
+    $("pageMessage").textContent = err.message;
+  }
+}
+
+async function changeStatus(action, id) {
+  const labels = {
+    approve: { title:"อนุมัติผู้ใช้งาน?", text:"บัญชีจะเปลี่ยนเป็น Active และสามารถ Login ได้", endpoint:"approve" },
+    reject: { title:"ปฏิเสธผู้ใช้งาน?", text:"บัญชีจะเปลี่ยนเป็น Rejected และ Login ไม่ได้", endpoint:"reject" },
+    deactivate: { title:"ระงับผู้ใช้งาน?", text:"บัญชีจะเปลี่ยนเป็น Inactive และ Login ไม่ได้", endpoint:"status", status:"Inactive" },
+    activate: { title:"เปิดใช้งานผู้ใช้งาน?", text:"บัญชีจะเปลี่ยนเป็น Active", endpoint:"status", status:"Active" }
+  };
+  const config = labels[action];
+  if (!config) return;
+
+  const result = await Swal.fire({ icon:"question", title:config.title, text:config.text, showCancelButton:true, confirmButtonText:"ยืนยัน", cancelButtonText:"ยกเลิก" });
+  if (!result.isConfirmed) return;
+
+  try {
+    const options = { method:"PATCH" };
+    if (config.status) {
+      options.body = JSON.stringify({ status: config.status });
+    }
+    const data = await api(`/api/admin/users/${id}/${config.endpoint}`, options);
+    await Swal.fire({ icon:"success", title:"ดำเนินการสำเร็จ", text:data.message, timer:1400, showConfirmButton:false });
+    await loadUsers();
+  } catch (err) {
+    Swal.fire({ icon:"error", title:"ดำเนินการไม่สำเร็จ", text:err.message });
+  }
+}
+
+$("usersBody").addEventListener("click", event => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  changeStatus(button.dataset.action, decodeURIComponent(button.dataset.id));
+});
+
+$("refreshBtn").onclick = loadUsers;
+$("statusFilter").onchange = loadUsers;
+let searchTimer;
+$("searchInput").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadUsers, 250); };
+$("backBtn").onclick = () => { window.location.href = "/"; };
+
+(async function init() {
+  try {
+    const me = await api("/api/auth/me");
+    const role = String(me.user?.ROLE || me.user?.role || "USER").toUpperCase();
+    if (role !== "ADMIN") throw Object.assign(new Error("คุณไม่มีสิทธิ์จัดการผู้ใช้งาน"), {status:403});
+    await loadUsers();
+  } catch (err) {
+    await Swal.fire({ icon:"warning", title:"ไม่มีสิทธิ์เข้าใช้งาน", text:err.message || "กรุณา Login ด้วย Admin", confirmButtonText:"กลับ Login" });
+    window.location.href = "/";
+  }
+})();
+</script>
+</body>
+</html>

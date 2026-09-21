@@ -12,7 +12,7 @@ import { startScanner } from "../modules/scanner.js";
 const params = new URLSearchParams(location.search);
 
 let session_id = "";
-const user = params.get("user") || "Nurse-A";
+let user = "";
 
 let currentItem = null;
 let items = [];
@@ -66,6 +66,7 @@ async function createSession() {
     const d = await r.json();
 
     session_id = d.session_id;
+    user = d.user?.full_name || "-";
 
   } catch (err) {
 

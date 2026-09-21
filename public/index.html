@@ -1,83 +1,1150 @@
 <!DOCTYPE html>
-<html>
+<html lang="th">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Emergency Check List</title>
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emergency Check List - Login</title>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .auth-page{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:#0f172a;color:#fff;font-family:Prompt,system-ui,sans-serif}
+    .auth-card{width:100%;max-width:480px;background:#1e293b;border-radius:20px;padding:28px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+    .auth-logo{text-align:center;font-size:44px}.auth-title{text-align:center;margin:8px 0 4px}.auth-subtitle{text-align:center;color:#94a3b8;font-size:13px;margin-bottom:24px}
+    .auth-tabs{display:flex;background:#0f172a;padding:4px;border-radius:12px;margin-bottom:20px}.auth-tab{flex:1;border:0;background:transparent;color:#94a3b8;padding:10px;border-radius:9px;cursor:pointer;font-weight:700}.auth-tab.active{background:#22c55e;color:#052e16}
+    .auth-form{display:grid;gap:12px}.auth-form label{font-size:12px;color:#cbd5e1}.auth-form input,.auth-form select{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #334155;background:#0f172a;color:#fff;border-radius:10px;outline:none}.auth-form input:focus,.auth-form select:focus{border-color:#22c55e}
+    .auth-btn{width:100%;border:0;border-radius:10px;padding:12px;font-weight:800;cursor:pointer}.auth-btn:disabled{opacity:.55;cursor:not-allowed}.btn-login{background:#22c55e;color:#052e16}.btn-secondary{background:#334155;color:#fff}.btn-admin{background:#38bdf8;color:#082f49}
+    .auth-note{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 12px;font-size:12px;color:#94a3b8;line-height:1.6}.password-note{font-size:11px;color:#94a3b8}.username-note{font-size:11px;color:#86efac;margin-top:5px}
+    .dashboard{display:none}.user-box{display:flex;align-items:center;gap:12px;background:#0f172a;padding:12px;border-radius:12px;margin-bottom:18px}.user-box img{width:48px;height:48px;border-radius:50%;object-fit:cover}.user-box small{display:block;color:#94a3b8}.dashboard-actions{display:grid;gap:10px}
+    #registerForm{display:none}.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:520px){.grid-2{grid-template-columns:1fr}}
+  </style>
 </head>
+<body class="auth-page">
+<div class="auth-card">
+  <div class="auth-logo">🚑</div>
+  <h2 class="auth-title">Emergency Check List</h2>
+  <div class="auth-subtitle">ระบบตรวจสอบ Emergency Cart</div>
 
-<body style="font-family:Prompt;background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh">
+  <div id="authArea">
+    <div class="auth-tabs">
+      <button id="tabLogin" class="auth-tab active" type="button">Login</button>
+      <button id="tabRegister" class="auth-tab" type="button">Registration</button>
+    </div>
 
-<div style="background:#1e293b;padding:25px;border-radius:16px;width:320px">
+    <form id="loginForm" class="auth-form">
+      <div><label for="loginUsername">Username</label><input id="loginUsername" autocomplete="username" required></div>
+      <div><label for="loginPassword">Password</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+      <button
+  id="loginBtn"
+  class="auth-btn btn-login"
+  type="submit"
+>
+  🔐 Login
+</button>
 
-  <h2 style="text-align:center">🚑 Emergency Check List</h2>
+<button
+  id="forgotPasswordBtn"
+  class="auth-forgot-btn"
+  type="button"
+>
+  🔑 ลืมรหัสผ่าน?
+</button>
+    </form>
 
-<label style="font-size:12px;color:#cbd5e1;display:block;margin-bottom:6px">
-  เลือกผู้ใช้งาน
-</label>
+    <form id="registerForm" class="auth-form">
+      <div class="auth-note">
+        📝 สมัครสมาชิกเพื่อเข้าใช้งานระบบ<br>
+        หลังสมัครสมาชิก บัญชีจะอยู่ในสถานะ <strong>Pending</strong><br>
+        และต้องได้รับการอนุมัติจากผู้ดูแลก่อน Login
+      </div>
 
-<select id="user"
-  style="width:100%;padding:10px;font-size:16px;border-radius:8px;border:none;margin-bottom:12px">
-</select>
+      <div><label for="fullNameTh">ชื่อ–สกุลภาษาไทย</label><input id="fullNameTh" autocomplete="name" required></div>
+      <div>
+        <label for="fullNameEn">ชื่อ–สกุลภาษาอังกฤษ</label>
+        <input id="fullNameEn" autocomplete="name" required>
+      </div>
+      <div>
+        <label for="username">Username</label>
+        <input id="username" autocomplete="username" readonly required>
+        <div class="username-note">ระบบสร้างอัตโนมัติจากชื่อภาษาอังกฤษ + ตัวอักษรแรกของนามสกุล เช่น Thanachanan Kenkong → thanachanan.k</div>
+      </div>
 
-  <button onclick="start()"
-    style="width:100%;margin-top:15px;padding:10px;border:none;border-radius:8px;background:#22c55e;font-weight:bold">
+      <div class="grid-2">
+        <div>
+          <label for="position">ตำแหน่ง</label>
+          <select id="position" required>
+            <option value="">-- เลือกตำแหน่ง --</option>
+            <option value="Register Nurse">Register Nurse</option>
+            <option value="Public Health">Public Health</option>
+          </select>
+        </div>
+        <div>
+          <label for="employmentType">ประเภทการจ้างงาน</label>
+          <select id="employmentType" required>
+            <option value="">-- เลือกประเภทการจ้างงาน --</option>
+            <option value="Full-Time">Full-Time</option>
+            <option value="Part-Time">Part-Time</option>
+          </select>
+        </div>
+      </div>
 
-    ▶ Start Check List
+      <div><label for="phone">เบอร์โทรศัพท์</label><input id="phone" type="tel" autocomplete="tel" required></div>
+      <div><label for="email">Email</label><input id="email" type="email" autocomplete="email" required></div>
+      <div><label for="password">Password</label><input id="password" type="password" autocomplete="new-password" minlength="8" required></div>
+      <div><label for="confirmPassword">Confirm Password</label><input id="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></div>
 
-  </button>
+      <div class="password-note">Password ต้องมีอย่างน้อย 8 ตัวอักษร</div>
+      <div class="auth-note">💬 LINE<br>การเชื่อมต่อ LINE จะเปิดใช้งานในขั้นตอนถัดไป<br>LINE User ID / Display Name / Picture URL จะถูกเก็บไว้รองรับการใช้งานในอนาคต</div>
 
+      <button id="registerBtn" class="auth-btn btn-login" type="submit">📝 Register</button>
+    </form>
+  </div>
+
+  <div id="dashboard" class="dashboard">
+    <div class="user-box">
+      <img id="dashPicture" alt="Profile" style="display:none">
+      <div><strong id="dashName">-</strong><small id="dashPosition">-</small></div>
+    </div>
+    <div class="dashboard-actions">
+      <button id="startBtn" class="auth-btn btn-login" type="button">▶ Start Emergency Check List</button>
+      <button id="adminUsersBtn" class="auth-btn btn-admin" type="button" style="display:none">👥 User Management</button>
+      <button id="logoutBtn" class="auth-btn btn-secondary" type="button">Logout</button>
+    </div>
+  </div>
 </div>
 
+html
 <script>
+"use strict";
 
-document.addEventListener("DOMContentLoaded", () => {
+/* =====================================================
+   GLOBAL
+===================================================== */
 
-  const el = document.getElementById("user");
+const $ = id => document.getElementById(id);
 
-  fetch("/api/users")
-    .then(r => r.json())
-    .then(users => {
 
-      if (!users.length) {
-        el.innerHTML = `<option>NO USERS</option>`;
-        return;
-      }
+/* =====================================================
+   TAB
+===================================================== */
 
-      el.innerHTML = users.map(u =>
-        `<option value="${u}">${u}</option>`
-      ).join("");
-    })
-    .catch(err => {
-      console.error(err);
-      el.innerHTML = `<option>LOAD FAIL</option>`;
-    });
+function showTab(tab){
 
-});
+  const login =
+    tab === "login";
 
-function start() {
+  $("loginForm").style.display =
+    login ? "grid" : "none";
 
-  const user = document.getElementById("user").value;
+  $("registerForm").style.display =
+    login ? "none" : "grid";
 
-  if (!user) return Swal.fire({
-  icon: 'warning',
-  title: 'กรุณาเลือกผู้ใช้งาน'
-});
+  $("tabLogin").classList.toggle(
+    "active",
+    login
+  );
 
-  fetch("/api/session/new")
-    .then(r => r.json())
-    .then(data => {
+  $("tabRegister").classList.toggle(
+    "active",
+    !login
+  );
 
-      const sid = data.session_id;
-
-      window.location.href =
-        `/session.html?sid=${sid}&user=${encodeURIComponent(user)}`;
-    });
 }
 
+
+/* =====================================================
+   TAB EVENTS
+===================================================== */
+
+$("tabLogin").onclick =
+  () => showTab("login");
+
+$("tabRegister").onclick =
+  () => showTab("register");
+
+
+/* =====================================================
+   API HELPER
+===================================================== */
+
+async function api(
+  url,
+  options = {}
+){
+
+  const res =
+    await fetch(
+      url,
+      {
+        credentials: "include",
+
+        ...options,
+
+        headers: {
+          "Content-Type":
+            "application/json",
+
+          ...(options.headers || {})
+        }
+      }
+    );
+
+
+  let data = {};
+
+  try {
+
+    data =
+      await res.json();
+
+  } catch {
+
+    data = {};
+
+  }
+
+
+  if (!res.ok) {
+
+    const err =
+      new Error(
+        data.message ||
+        "เกิดข้อผิดพลาด"
+      );
+
+    err.status =
+      res.status;
+
+    err.code =
+      data.code;
+
+    throw err;
+
+  }
+
+
+  return data;
+
+}
+
+
+/* =====================================================
+   USERNAME GENERATOR
+===================================================== */
+
+function generateUsername(value){
+
+  const parts =
+    String(value || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+
+
+  if(parts.length < 2){
+
+    return "";
+
+  }
+
+
+  const firstName =
+    parts[0]
+      .toLowerCase()
+      .replace(
+        /[^a-z0-9]/g,
+        ""
+      );
+
+
+  const surnameInitial =
+    parts[
+      parts.length - 1
+    ]
+      .charAt(0)
+      .toLowerCase()
+      .replace(
+        /[^a-z]/g,
+        ""
+      );
+
+
+  if(
+    !firstName ||
+    !surnameInitial
+  ){
+
+    return "";
+
+  }
+
+
+  return `${firstName}.${surnameInitial}`;
+
+}
+
+
+/* =====================================================
+   AUTO USERNAME
+===================================================== */
+
+$("fullNameEn")
+  .addEventListener(
+    "input",
+    e => {
+
+      $("username").value =
+        generateUsername(
+          e.target.value
+        );
+
+    }
+  );
+
+
+/* =====================================================
+   REGISTRATION
+===================================================== */
+
+$("registerForm").onsubmit =
+  async e => {
+
+    e.preventDefault();
+
+
+    if(
+      !e.currentTarget.checkValidity()
+    ){
+
+      e.currentTarget
+        .reportValidity();
+
+      return;
+
+    }
+
+
+    const password =
+      $("password").value;
+
+    const confirmPassword =
+      $("confirmPassword").value;
+
+
+    const username =
+      generateUsername(
+        $("fullNameEn").value
+      );
+
+
+    $("username").value =
+      username;
+
+
+    if(!username){
+
+      return Swal.fire({
+
+        icon: "warning",
+
+        title:
+          "ชื่อภาษาอังกฤษไม่ถูกต้อง",
+
+        text:
+          "กรุณากรอกชื่อและนามสกุลภาษาอังกฤษ เช่น Thanachanan Kenkong"
+
+      });
+
+    }
+
+
+    if(
+      password.length < 8
+    ){
+
+      return Swal.fire({
+
+        icon: "warning",
+
+        title:
+          "Password ไม่ถูกต้อง",
+
+        text:
+          "Password ต้องมีอย่างน้อย 8 ตัวอักษร"
+
+      });
+
+    }
+
+
+    if(
+      password !==
+      confirmPassword
+    ){
+
+      return Swal.fire({
+
+        icon: "warning",
+
+        title:
+          "Password ไม่ตรงกัน",
+
+        text:
+          "กรุณาตรวจสอบ Password และ Confirm Password"
+
+      });
+
+    }
+
+
+    try{
+
+      $("registerBtn").disabled =
+        true;
+
+      $("registerBtn").textContent =
+        "⏳ กำลังสมัครสมาชิก...";
+
+
+      const data =
+        await api(
+          "/api/auth/register",
+          {
+
+            method: "POST",
+
+            body:
+              JSON.stringify({
+
+                full_name_th:
+                  $("fullNameTh")
+                    .value
+                    .trim(),
+
+                full_name_en:
+                  $("fullNameEn")
+                    .value
+                    .trim(),
+
+                position:
+                  $("position")
+                    .value,
+
+                employment_type:
+                  $("employmentType")
+                    .value,
+
+                username:
+                  username,
+
+                password:
+                  password,
+
+                confirm_password:
+                  confirmPassword,
+
+                phone:
+                  $("phone")
+                    .value
+                    .trim(),
+
+                email:
+                  $("email")
+                    .value
+                    .trim(),
+
+                line_user_id:
+                  null,
+
+                line_display_name:
+                  null,
+
+                line_picture_url:
+                  null
+
+              })
+
+          }
+        );
+
+
+      await Swal.fire({
+
+        icon: "success",
+
+        title:
+          "Registration สำเร็จ",
+
+        text:
+          data.message,
+
+        confirmButtonText:
+          "ไป Login"
+
+      });
+
+
+      $("loginUsername").value =
+        username;
+
+
+      $("loginPassword").value =
+        "";
+
+
+      $("registerForm").reset();
+
+
+      $("username").value =
+        "";
+
+
+      showTab("login");
+
+
+    }catch(err){
+
+      console.error(
+        "REGISTER ERROR:",
+        err
+      );
+
+
+      Swal.fire({
+
+        icon: "error",
+
+        title:
+          "Registration ไม่สำเร็จ",
+
+        text:
+          err.message
+
+      });
+
+
+    }finally{
+
+      $("registerBtn").disabled =
+        false;
+
+      $("registerBtn").textContent =
+        "📝 Register";
+
+    }
+
+  };
+
+
+/* =====================================================
+   LOGIN
+===================================================== */
+
+$("loginForm").onsubmit =
+  async e => {
+
+    e.preventDefault();
+
+
+    try{
+
+      $("loginBtn").disabled =
+        true;
+
+      $("loginBtn").textContent =
+        "⏳ กำลัง Login...";
+
+
+      const data =
+        await api(
+          "/api/auth/login",
+          {
+
+            method: "POST",
+
+            body:
+              JSON.stringify({
+
+                username:
+                  $("loginUsername")
+                    .value
+                    .trim(),
+
+                password:
+                  $("loginPassword")
+                    .value
+
+              })
+
+          }
+        );
+
+
+      showDashboard(
+        data.user
+      );
+
+
+    }catch(err){
+
+      console.error(
+        "LOGIN ERROR:",
+        err
+      );
+
+
+      Swal.fire({
+
+        icon: "error",
+
+        title:
+          "Login ไม่สำเร็จ",
+
+        text:
+          err.message
+
+      });
+
+
+    }finally{
+
+      $("loginBtn").disabled =
+        false;
+
+      $("loginBtn").textContent =
+        "🔐 Login";
+
+    }
+
+  };
+
+
+/* =====================================================
+   2.3 FORGOT PASSWORD
+===================================================== */
+
+$("forgotPasswordBtn").onclick =
+  async () => {
+
+    const result =
+      await Swal.fire({
+
+        title:
+          "🔑 ลืมรหัสผ่าน",
+
+        html: `
+          <div
+            style="
+              text-align:left;
+              font-size:13px;
+              color:#cbd5e1;
+            "
+          >
+
+            <div
+              style="
+                margin-bottom:8px;
+              "
+            >
+              กรอก Username หรือ Email
+            </div>
+
+            <input
+              id="swalResetIdentifier"
+              class="swal2-input"
+              placeholder="Username หรือ Email"
+              autocomplete="username"
+            >
+
+          </div>
+        `,
+
+        background:
+          "#1e293b",
+
+        color:
+          "#fff",
+
+        showCancelButton:
+          true,
+
+        confirmButtonText:
+          "สร้าง Reset Link",
+
+        cancelButtonText:
+          "ยกเลิก",
+
+        confirmButtonColor:
+          "#22c55e",
+
+        cancelButtonColor:
+          "#334155",
+
+        focusConfirm:
+          false,
+
+        preConfirm: () => {
+
+          const value =
+            document
+              .getElementById(
+                "swalResetIdentifier"
+              )
+              ?.value
+              .trim();
+
+
+          if(!value){
+
+            Swal.showValidationMessage(
+              "กรุณากรอก Username หรือ Email"
+            );
+
+            return false;
+
+          }
+
+
+          return value;
+
+        }
+
+      });
+
+
+    if(
+      !result.isConfirmed
+    ){
+
+      return;
+
+    }
+
+
+    try{
+
+      $("forgotPasswordBtn")
+        .disabled =
+        true;
+
+
+      $("forgotPasswordBtn")
+        .textContent =
+        "⏳ กำลังสร้าง Reset Link...";
+
+
+      const data =
+        await api(
+          "/api/auth/forgot-password",
+          {
+
+            method:
+              "POST",
+
+            body:
+              JSON.stringify({
+
+                identifier:
+                  result.value
+
+              })
+
+          }
+        );
+
+
+      /*
+       * PHASE 1
+       *
+       * ยังไม่ส่ง Email
+       *
+       * Server จะสร้าง Reset Link
+       * แล้วส่ง URL กลับมา
+       */
+
+      const resetUrl =
+        data.reset_url;
+
+
+      if(!resetUrl){
+
+        throw new Error(
+          "Server ไม่ได้ส่ง Reset URL กลับมา"
+        );
+
+      }
+
+
+      await Swal.fire({
+
+        icon:
+          "success",
+
+        title:
+          "สร้าง Reset Link สำเร็จ",
+
+        html: `
+
+          <div
+            style="
+              font-size:13px;
+              line-height:1.8;
+              text-align:left;
+            "
+          >
+
+            <div>
+
+              Username:
+
+              <strong>
+                ${escapeHtml(
+                  data.username || "-"
+                )}
+              </strong>
+
+            </div>
+
+            <div
+              style="
+                margin-top:8px;
+                color:#94a3b8;
+              "
+            >
+
+              Reset Link ใช้ได้ 15 นาที
+              และใช้ได้เพียงครั้งเดียว
+
+            </div>
+
+          </div>
+
+        `,
+
+        confirmButtonText:
+          "ตั้งรหัสผ่านใหม่"
+
+      });
+
+
+      window.location.href =
+        resetUrl;
+
+
+    }catch(err){
+
+      console.error(
+        "FORGOT PASSWORD ERROR:",
+        err
+      );
+
+
+      Swal.fire({
+
+        icon:
+          "error",
+
+        title:
+          "ไม่สามารถสร้าง Reset Link",
+
+        text:
+          err.message ||
+          "เกิดข้อผิดพลาด"
+
+      });
+
+
+    }finally{
+
+      $("forgotPasswordBtn")
+        .disabled =
+        false;
+
+
+      $("forgotPasswordBtn")
+        .textContent =
+        "🔑 ลืมรหัสผ่าน?";
+
+    }
+
+  };
+
+
+/* =====================================================
+   HTML ESCAPE
+===================================================== */
+
+function escapeHtml(value){
+
+  return String(
+    value ?? ""
+  )
+
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+
+    .replace(
+      /</g,
+      "&lt;"
+    )
+
+    .replace(
+      />/g,
+      "&gt;"
+    )
+
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
+}
+
+
+/* =====================================================
+   DASHBOARD
+===================================================== */
+
+function showDashboard(
+  user
+){
+
+  $("authArea")
+    .style
+    .display =
+    "none";
+
+
+  $("dashboard")
+    .style
+    .display =
+    "block";
+
+
+  $("dashName")
+    .textContent =
+
+    user.FULL_NAME_TH ||
+
+    user.full_name_th ||
+
+    user.FULL_NAME_EN ||
+
+    user.full_name ||
+
+    "-";
+
+
+  $("dashPosition")
+    .textContent =
+
+    `${
+
+      user.POSITION ||
+
+      user.position ||
+
+      "-"
+
+    }${
+
+      user.EMPLOYMENT_TYPE ||
+
+      user.employment_type
+
+        ? ` · ${
+            user.EMPLOYMENT_TYPE ||
+            user.employment_type
+          }`
+
+        : ""
+
+    }`;
+
+
+  const picture =
+    user.LINE_PICTURE_URL ||
+    user.line_picture_url ||
+    "";
+
+
+  if(picture){
+
+    $("dashPicture")
+      .src =
+      picture;
+
+    $("dashPicture")
+      .style
+      .display =
+      "block";
+
+  }else{
+
+    $("dashPicture")
+      .style
+      .display =
+      "none";
+
+  }
+
+
+  const role =
+    String(
+      user.ROLE ||
+      user.role ||
+      "USER"
+    )
+      .toUpperCase();
+
+
+  $("adminUsersBtn")
+    .style
+    .display =
+    role === "ADMIN"
+      ? "block"
+      : "none";
+
+}
+
+
+/* =====================================================
+   ADMIN USER MANAGEMENT
+===================================================== */
+
+$("adminUsersBtn").onclick =
+  () => {
+
+    window.location.href =
+      "/admin-users.html";
+
+  };
+
+
+/* =====================================================
+   START EMERGENCY CHECK LIST
+===================================================== */
+
+$("startBtn").onclick =
+  async () => {
+
+    try{
+
+      const data =
+        await api(
+          "/api/session/new"
+        );
+
+
+      window.location.href =
+        `/session.html?sid=${
+          encodeURIComponent(
+            data.session_id
+          )
+        }`;
+
+
+    }catch(err){
+
+      Swal.fire({
+
+        icon:
+          "error",
+
+        title:
+          "ไม่สามารถเริ่ม Session",
+
+        text:
+          err.message
+
+      });
+
+    }
+
+  };
+
+
+/* =====================================================
+   LOGOUT
+===================================================== */
+
+$("logoutBtn").onclick =
+  async () => {
+
+    try{
+
+      await api(
+        "/api/auth/logout",
+        {
+          method:
+            "POST"
+        }
+      );
+
+    }catch(err){
+
+      console.error(
+        "LOGOUT ERROR:",
+        err
+      );
+
+    }finally{
+
+      location.reload();
+
+    }
+
+  };
+
+
+/* =====================================================
+   CHECK LOGIN
+===================================================== */
+
+async function checkLogin(){
+
+  try{
+
+    const data =
+      await api(
+        "/api/auth/me"
+      );
+
+
+    showDashboard(
+      data.user
+    );
+
+
+  }catch(err){
+
+    console.log(
+      "NOT LOGGED IN"
+    );
+
+
+    showTab(
+      "login"
+    );
+
+  }
+
+}
+
+
+/* =====================================================
+   INIT
+===================================================== */
+
+checkLogin();
+
 </script>
-<script type="module" src="views/index.view.js"></script>
+
 </body>
 </html>
