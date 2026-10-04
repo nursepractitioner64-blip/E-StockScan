@@ -1,36 +1,206 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dispense | E-StockScan</title><link rel="icon" href="/icon.png"><link rel="stylesheet" href="./style.css">
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script><script src="https://unpkg.com/html5-qrcode"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dispense | E-StockScan</title>
+<link rel="icon" href="/icon.png">
+<link rel="stylesheet" href="./style.css">
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
-body{background:#f1f5f9;font-family:"Prompt",system-ui,sans-serif}.disp-wrap{max-width:760px;margin:auto;padding:18px 14px 40px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px}.top h1{font-size:23px;margin:0;color:#0f172a}.back{border:0;background:#fff;border-radius:10px;padding:9px 13px;cursor:pointer}.card{background:#fff;border-radius:18px;padding:16px;box-shadow:0 8px 22px rgba(15,23,42,.08);margin-top:14px}.reader{overflow:hidden;border-radius:14px}.muted{color:#64748b}.field{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid #e2e8f0}.field span{color:#64748b}.field strong{color:#0f172a;text-align:right;word-break:break-word}.label{display:block;font-weight:700;color:#334155;margin:14px 0 7px}.select{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:11px;background:#fff;font:inherit}.confirm{width:100%;border:0;border-radius:12px;padding:13px;margin-top:16px;background:#0f766e;color:#fff;font-weight:800;cursor:pointer}.scan-again{width:100%;border:1px solid #cbd5e1;border-radius:12px;padding:12px;margin-top:10px;background:#fff;color:#0f172a;font-weight:700;cursor:pointer}.lot-info{margin-top:9px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:#475569;font-size:14px}.danger{color:#b91c1c}
+body{background:#f1f5f9;font-family:"Prompt",system-ui,sans-serif}.disp-wrap{max-width:760px;margin:auto;padding:18px 14px 40px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px}.top h1{font-size:23px;margin:0;color:#0f172a}.back{border:0;background:#fff;border-radius:10px;padding:9px 13px;cursor:pointer}.card{background:#fff;border-radius:18px;padding:16px;box-shadow:0 8px 22px rgba(15,23,42,.08);margin-top:14px}.camera-box{background:#0f172a;border-radius:14px;overflow:hidden;position:relative;min-height:240px;display:flex;align-items:center;justify-content:center}.camera-box video{width:100%;display:block;max-height:65vh;object-fit:cover}.camera-placeholder{color:#cbd5e1;text-align:center;padding:40px 20px}.scan-line{position:absolute;left:10%;right:10%;top:50%;height:2px;background:#14b8a6;box-shadow:0 0 12px rgba(20,184,166,.8);display:none}.camera-actions{display:flex;gap:10px;margin-top:12px}.btn{flex:1;border:0;border-radius:12px;padding:13px;font:inherit;font-weight:800;cursor:pointer}.primary{background:#0f766e;color:#fff}.secondary{background:#fff;color:#0f172a;border:1px solid #cbd5e1}.btn:disabled{opacity:.45;cursor:not-allowed}.status{margin:10px 0 0;color:#64748b;font-size:14px}.field{margin-top:13px}.label{display:block;font-weight:700;color:#334155;margin-bottom:7px}.input,.select{width:100%;box-sizing:border-box;padding:12px;border:1px solid #cbd5e1;border-radius:11px;background:#fff;font:inherit}.input[readonly]{background:#f8fafc}.lot-info{margin-top:9px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:#475569;font-size:14px}.confirm{width:100%;border:0;border-radius:12px;padding:13px;margin-top:16px;background:#0f766e;color:#fff;font-weight:800;cursor:pointer}.scan-again{width:100%;border:1px solid #cbd5e1;border-radius:12px;padding:12px;margin-top:10px;background:#fff;color:#0f172a;font-weight:700;cursor:pointer}.danger{color:#b91c1c}.success{color:#047857}.ocr-progress{height:7px;background:#e2e8f0;border-radius:99px;overflow:hidden;margin-top:9px;display:none}.ocr-progress>div{height:100%;width:0;background:#0f766e;transition:width .2s}.hidden{display:none!important}
 </style>
 </head>
-<body><main class="disp-wrap">
-<div class="top"><h1>💊 DISPENSE</h1><button class="back" id="backBtn">← Mainpage</button></div>
-<section class="card"><div id="reader" class="reader"></div><p id="scanHint" class="muted">สแกน Sticker เพื่ออ่านข้อมูล 4 รายการ</p></section>
-<section id="preview" class="card" style="display:none"></section>
+<body>
+<main class="disp-wrap">
+  <div class="top"><h1>💊 DISPENSE</h1><button class="back" id="backBtn">← Mainpage</button></div>
+
+  <section class="card">
+    <div class="camera-box">
+      <video id="camera" autoplay playsinline muted></video>
+      <div id="cameraPlaceholder" class="camera-placeholder">กด “เปิดกล้อง” เพื่อสแกน Sticker</div>
+      <div id="scanLine" class="scan-line"></div>
+    </div>
+    <div class="camera-actions">
+      <button id="startCamera" class="btn primary">📷 เปิดกล้อง</button>
+      <button id="captureSticker" class="btn secondary" disabled>📸 อ่าน Sticker</button>
+      <button id="stopCamera" class="btn secondary" disabled>⏹ หยุด</button>
+    </div>
+    <p id="scanHint" class="status">Sticker ไม่มี QR — ระบบจะถ่ายภาพแล้วใช้ OCR อ่านข้อมูล</p>
+    <div id="ocrProgress" class="ocr-progress"><div id="ocrBar"></div></div>
+    <p id="ocrStatus" class="status"></p>
+    <canvas id="captureCanvas" class="hidden"></canvas>
+  </section>
+
+  <section id="preview" class="card hidden"></section>
 </main>
+
 <script type="module">
-import {getDispenseItem,getDispenseLots,submitDispense} from "./modules/dispense.js";
-let scanner=null,locked=false,lastScan="",item=null,lots=[],selectedLot=null; const $=id=>document.getElementById(id);
+import {getDispenseLots,submitDispense} from "./modules/dispense.js";
+
+const $=id=>document.getElementById(id);
+let stream=null,item=null,lots=[],selectedLot=null,worker=null,ocrBusy=false;
+
 $("backBtn").onclick=()=>location.href="/mainpage.html";
-async function showItem(qrValue){if(locked||qrValue===lastScan)return;locked=true;lastScan=qrValue;setTimeout(()=>{locked=false;lastScan=""},1200);try{if(scanner)await scanner.pause(true);item=await getDispenseItem(qrValue);lots=await getDispenseLots(item.medicine_name);selectedLot=null;render();}catch(e){if(scanner)await scanner.resume();Swal.fire({icon:"warning",title:"อ่านข้อมูลไม่สำเร็จ",text:e.message});}}
-function render(){const p=$("preview");p.style.display="block";p.innerHTML=`<h2 style="margin:0 0 10px">ตรวจสอบรายการจ่าย</h2>
-<label class="label">ชื่อผู้รับบริการ</label><input id="patientName" class="select" value="${esc(item.patient_name)}" readonly>
-<label class="label">HN</label><input id="hn" class="select" value="${esc(item.hn)}" readonly>
-<label class="label">ชื่อยา/วัคซีน</label><input id="medicineName" class="select" value="${esc(item.medicine_name)}" readonly>
-<label class="label">จำนวนโดส</label><input id="doseCount" class="select" value="${esc(item.dose_count)}" readonly>
-<label class="label" for="lotSelect">เลข Lot จาก Inventory</label><select id="lotSelect" class="select"><option value="">-- ผู้ตรวจเลือก Lot --</option>${lots.map((x,i)=>`<option value="${i}">${esc(x.lot)}</option>`).join("")}</select>
-<label class="label" for="exp">EXP</label><input id="exp" class="select" value="" placeholder="ระบบจะเติมอัตโนมัติ" readonly>
-<div id="lotInfo" class="lot-info">เลือก Lot เพื่อให้ระบบเติม EXP และตรวจสอบคงเหลือ</div>
-<button id="confirm" class="confirm">ยืนยันการจ่าย</button><button id="scanAgain" class="scan-again">สแกน Sticker ใหม่</button>`;
-$("lotSelect").onchange=()=>{const i=$("lotSelect").value;selectedLot=i===""?null:lots[Number(i)];$("exp").value=selectedLot?.exp||"";$("lotInfo").innerHTML=selectedLot?`Lot: <b>${esc(selectedLot.lot)}</b> &nbsp;|&nbsp; EXP: <b>${esc(selectedLot.exp)}</b> &nbsp;|&nbsp; คงเหลือ: <b>${esc(selectedLot.balance)}</b>`:`เลือก Lot เพื่อให้ระบบเติม EXP และตรวจสอบคงเหลือ`;};
-$("confirm").onclick=confirmDispense;$('scanAgain').onclick=async()=>{item=null;lots=[];selectedLot=null;p.style.display="none";if(scanner)await scanner.resume();};
-if(!lots.length){$("lotInfo").innerHTML='<span class="danger">ไม่พบ Lot ที่มี Stock สำหรับรายการนี้</span>';$('confirm').disabled=true;$('confirm').style.opacity=.5;}}
-async function confirmDispense(){if(!item||!selectedLot)return Swal.fire({icon:"warning",title:"กรุณาเลือก Lot",text:"ผู้ตรวจต้องเลือก Lot จาก Inventory ก่อนยืนยันการจ่าย"});if(Number(item.dose_count)>Number(selectedLot.balance))return Swal.fire({icon:"warning",title:"Stock ไม่พอ",text:`Lot ${selectedLot.lot} คงเหลือ ${selectedLot.balance} แต่ต้องจ่าย ${item.dose_count}`});const ok=await Swal.fire({icon:"question",title:"ยืนยันการจ่าย?",html:`${esc(item.patient_name)}<br>HN: <b>${esc(item.hn)}</b><br>${esc(item.medicine_name)}<br>จำนวน <b>${esc(item.dose_count)}</b> โดส<br>Lot: <b>${esc(selectedLot.lot)}</b><br>EXP: <b>${esc(selectedLot.exp)}</b>`,showCancelButton:true,confirmButtonText:"ยืนยัน",cancelButtonText:"ยกเลิก"});if(!ok.isConfirmed)return;try{const result=await submitDispense({...item,lot:selectedLot.lot,exp:selectedLot.exp,code:selectedLot.code});await Swal.fire({icon:"success",title:"บันทึกการจ่ายสำเร็จ",text:`เลขที่ ${result.ref_no}`,confirmButtonText:"สแกนรายการถัดไป"});item=null;lots=[];selectedLot=null;$("preview").style.display="none";if(scanner)await scanner.resume();}catch(e){Swal.fire({icon:"error",title:"บันทึกไม่สำเร็จ",text:e.message});}}
+$("startCamera").onclick=startCamera;
+$("captureSticker").onclick=captureSticker;
+$("stopCamera").onclick=stopCamera;
+
+async function startCamera(){
+  if(stream)return;
+  try{
+    if(!window.isSecureContext)throw new Error("ต้องเปิดระบบผ่าน HTTPS เพื่อใช้งานกล้องบนโทรศัพท์");
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},audio:false});
+    $("camera").srcObject=stream;
+    $("cameraPlaceholder").classList.add("hidden");
+    $("scanLine").style.display="block";
+    $("startCamera").disabled=true;
+    $("captureSticker").disabled=false;
+    $("stopCamera").disabled=false;
+    $("ocrStatus").textContent="กล้องพร้อม — จัด Sticker ให้อยู่เต็มกรอบ แล้วกด “อ่าน Sticker”";
+  }catch(e){
+    Swal.fire({icon:"error",title:"เปิดกล้องไม่ได้",text:e.message||"กรุณาอนุญาต Camera ใน Browser"});
+  }
+}
+
+function stopCamera(){
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  $("camera").srcObject=null;
+  $("cameraPlaceholder").classList.remove("hidden");
+  $("scanLine").style.display="none";
+  $("startCamera").disabled=false;
+  $("captureSticker").disabled=true;
+  $("stopCamera").disabled=true;
+}
+
+function captureFrame(){
+  const video=$("camera");
+  if(!video.videoWidth)throw new Error("กล้องยังไม่พร้อม กรุณารอสักครู่");
+  const canvas=$("captureCanvas");
+  const maxWidth=1600;
+  const scale=Math.min(1,maxWidth/video.videoWidth);
+  canvas.width=Math.round(video.videoWidth*scale);
+  canvas.height=Math.round(video.videoHeight*scale);
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  // Light contrast enhancement helps OCR on printed stickers.
+  const image=ctx.getImageData(0,0,canvas.width,canvas.height);
+  for(let i=0;i<image.data.length;i+=4){
+    const y=.299*image.data[i]+.587*image.data[i+1]+.114*image.data[i+2];
+    const v=Math.max(0,Math.min(255,(y-128)*1.35+128));
+    image.data[i]=image.data[i+1]=image.data[i+2]=v;
+  }
+  ctx.putImageData(image,0,0);
+  return canvas;
+}
+
+async function captureSticker(){
+  if(ocrBusy)return;
+  try{
+    ocrBusy=true;
+    $("captureSticker").disabled=true;
+    $("ocrProgress").style.display="block";
+    $("ocrBar").style.width="2%";
+    $("ocrStatus").textContent="กำลังอ่าน Sticker ด้วย OCR...";
+    const canvas=captureFrame();
+    if(!worker){
+      $("ocrStatus").textContent="กำลังเตรียมระบบอ่านภาษาไทย/อังกฤษ...";
+      worker=await Tesseract.createWorker("tha+eng",1,{logger:m=>{
+        if(m.status){$("ocrStatus").textContent=`${m.status} ${m.progress?Math.round(m.progress*100):""}%`;}
+        if(typeof m.progress==="number")$("ocrBar").style.width=`${Math.max(2,Math.round(m.progress*100))}%`;
+      }});
+    }
+    const result=await worker.recognize(canvas);
+    const text=result?.data?.text||"";
+    const data=parseStickerText(text);
+    if(!data.patient_name||!data.hn||!data.medicine_name||!data.dose_count){
+      console.warn("OCR RAW TEXT:\n",text,data);
+      throw new Error("อ่านข้อมูลไม่ครบ กรุณาจัด Sticker ให้อยู่ตรงกลางและถ่ายใหม่");
+    }
+    item=data;
+    stopCamera();
+    $("ocrBar").style.width="100%";
+    $("ocrStatus").textContent="อ่าน Sticker สำเร็จ กำลังค้นหา Lot จาก Inventory...";
+    lots=await getDispenseLots(item.medicine_name);
+    selectedLot=null;
+    render();
+    $("ocrStatus").textContent="อ่านสำเร็จ — กรุณาเลือก Lot จาก Inventory";
+  }catch(e){
+    Swal.fire({icon:"warning",title:"อ่าน Sticker ไม่สำเร็จ",text:e.message||"กรุณาลองถ่ายใหม่"});
+    $("ocrStatus").textContent="อ่านไม่สำเร็จ — ลองจัด Sticker ให้เต็มภาพแล้วอ่านใหม่";
+  }finally{
+    ocrBusy=false;
+    $("captureSticker").disabled=!stream;
+    setTimeout(()=>$("ocrProgress").style.display="none",600);
+  }
+}
+
+function clean(s){return String(s||"").replace(/[|]/g," ").replace(/\s+/g," ").trim();}
+function parseStickerText(raw){
+  const lines=String(raw).split(/\r?\n/).map(x=>clean(x)).filter(Boolean);
+  const joined=lines.join(" ");
+  const hn=(joined.match(/(?:HN\s*[:：]?\s*)(\d{8,20})/i)||[])[1]||((joined.match(/\b(\d{10,15})\b/)||[])[1]||"");
+  let patient="";
+  for(const line of lines){
+    if(/^(?:น\.ส\.|นางสาว|นาย|นาง|เด็กชาย|เด็กหญิง)/.test(line)){patient=line.replace(/\s*(?:วันที่|วันเกิด|HN)\s*[:：]?.*$/i,"").trim();break;}
+  }
+  if(!patient){
+    const m=joined.match(/((?:น\.ส\.|นางสาว|นาย|นาง|เด็กชาย|เด็กหญิง)\s*[^\d]+?)(?=\s*(?:วันที่|วันเกิด|HN)\b)/i);
+    if(m)patient=clean(m[1]);
+  }
+  let medicine="";
+  for(const line of lines){
+    const noDose=line.replace(/\s*[#＃]\s*\d+\s*(?:โด๊ส|โดส|dose|doses?)\b.*$/i,"").replace(/\s*\.\s*$/," ").trim();
+    if(/^vaccine\b/i.test(noDose)||/^ยา\b/i.test(noDose)||/^วัคซีน\b/.test(noDose)){medicine=clean(noDose);break;}
+  }
+  if(!medicine){
+    const m=joined.match(/(Vaccine\s+[^#\r\n]+?)(?=\s*[#＃]\s*\d+\s*(?:โด๊ส|โดส|dose|doses?)|\s*Lot\s*[:：]|\s*วิธีใช้)/i);
+    if(m)medicine=clean(m[1]);
+  }
+  const dose=(joined.match(/[#＃]\s*(\d+)\s*(?:โด๊ส|โดส|dose|doses?)\b/i)||[])[1]||((joined.match(/(?:จำนวน|qty)\s*[:：]?\s*(\d+)/i)||[])[1]||"");
+  return {patient_name:patient,hn,medicine_name:medicine,dose_count:dose,ocr_raw:raw};
+}
+
 function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#039;","\"":"&quot;"}[c]));}
-async function init(){try{await fetch("/api/auth/me",{credentials:"include"}).then(r=>{if(!r.ok)throw new Error()});}catch{location.href="/index.html";return;}scanner=new Html5Qrcode("reader");try{await scanner.start({facingMode:"environment"},{fps:10,qrbox:(w,h)=>({width:Math.min(w,320),height:Math.min(h,320)})},showItem);}catch(e){Swal.fire({icon:"error",title:"เปิดกล้องไม่ได้",text:e.message});}}init();
-</script></body></html>
+
+function render(){
+  const p=$("preview");p.classList.remove("hidden");
+  p.innerHTML=`<h2 style="margin:0 0 10px">ตรวจสอบข้อมูลจาก Sticker</h2>
+  <div class="field"><label class="label">ชื่อผู้รับบริการ</label><input id="patientName" class="input" value="${esc(item.patient_name)}" readonly></div>
+  <div class="field"><label class="label">HN</label><input id="hn" class="input" value="${esc(item.hn)}" readonly></div>
+  <div class="field"><label class="label">ชื่อยา/วัคซีน</label><input id="medicineName" class="input" value="${esc(item.medicine_name)}" readonly></div>
+  <div class="field"><label class="label">จำนวนโดส</label><input id="doseCount" class="input" value="${esc(item.dose_count)}" readonly></div>
+  <div class="field"><label class="label" for="lotSelect">Lot จาก INVENTORY_MOVEMENT</label><select id="lotSelect" class="select"><option value="">-- ผู้ตรวจเลือก Lot --</option>${lots.map((x,i)=>`<option value="${i}">${esc(x.lot)} — คงเหลือ ${esc(x.balance)}</option>`).join("")}</select></div>
+  <div class="field"><label class="label">EXP</label><input id="exp" class="input" value="" placeholder="ระบบจะเติมอัตโนมัติ" readonly></div>
+  <div id="lotInfo" class="lot-info">เลือก Lot เพื่อให้ระบบเติม EXP</div>
+  <button id="confirm" class="confirm" disabled>ยืนยันการจ่าย</button>
+  <button id="scanAgain" class="scan-again">📷 สแกน Sticker ใหม่</button>`;
+  $("lotSelect").onchange=()=>{const i=$("lotSelect").value;selectedLot=i===""?null:lots[Number(i)];$("exp").value=selectedLot?.exp||"";$("lotInfo").innerHTML=selectedLot?`Lot: <b>${esc(selectedLot.lot)}</b> &nbsp;|&nbsp; EXP: <b>${esc(selectedLot.exp)}</b> &nbsp;|&nbsp; คงเหลือ: <b>${esc(selectedLot.balance)}</b>`:`เลือก Lot เพื่อให้ระบบเติม EXP`;$("confirm").disabled=!selectedLot;};
+  $("confirm").onclick=confirmDispense;
+  $("scanAgain").onclick=async()=>{item=null;lots=[];selectedLot=null;p.classList.add("hidden");$("ocrStatus").textContent="พร้อมสแกน Sticker ใหม่";await startCamera();};
+  if(!lots.length){$("lotInfo").innerHTML='<span class="danger">ไม่พบ Lot ที่มี Stock สำหรับรายการนี้</span>';}
+}
+
+async function confirmDispense(){
+  if(!item||!selectedLot)return Swal.fire({icon:"warning",title:"กรุณาเลือก Lot",text:"ผู้ตรวจต้องเลือก Lot จาก Inventory ก่อนยืนยันการจ่าย"});
+  if(Number(item.dose_count)>Number(selectedLot.balance))return Swal.fire({icon:"warning",title:"Stock ไม่พอ",text:`Lot ${selectedLot.lot} คงเหลือ ${selectedLot.balance} แต่ต้องจ่าย ${item.dose_count}`});
+  const ok=await Swal.fire({icon:"question",title:"ยืนยันการจ่าย?",html:`${esc(item.patient_name)}<br>HN: <b>${esc(item.hn)}</b><br>${esc(item.medicine_name)}<br>จำนวน <b>${esc(item.dose_count)}</b> โดส<br>Lot: <b>${esc(selectedLot.lot)}</b><br>EXP: <b>${esc(selectedLot.exp)}</b>`,showCancelButton:true,confirmButtonText:"ยืนยัน",cancelButtonText:"ยกเลิก"});
+  if(!ok.isConfirmed)return;
+  try{
+    const result=await submitDispense({...item,lot:selectedLot.lot});
+    await Swal.fire({icon:"success",title:"บันทึกการจ่ายสำเร็จ",text:`เลขที่ ${result.ref_no}`,confirmButtonText:"สแกนรายการถัดไป"});
+    item=null;lots=[];selectedLot=null;$("preview").classList.add("hidden");await startCamera();
+  }catch(e){Swal.fire({icon:"error",title:"บันทึกไม่สำเร็จ",text:e.message});}
+}
+
+async function init(){
+  try{await fetch("/api/auth/me",{credentials:"include"}).then(r=>{if(!r.ok)throw new Error();});}
+  catch{location.href="/index.html";return;}
+  $("ocrStatus").textContent="พร้อม — กดเปิดกล้องเพื่อเริ่มสแกน Sticker";
+}
+init();
+window.addEventListener("pagehide",async()=>{stopCamera();if(worker)await worker.terminate().catch(()=>{});});
+</script>
+</body>
+</html>
