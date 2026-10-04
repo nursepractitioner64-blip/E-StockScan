@@ -1808,6 +1808,314 @@ app.post("/api/close", requireAuth, async (req, res) => {
   }
 });
 
+
+/* =========================================
+   DISPENSE / RX STICKER OUT
+   -----------------------------------------
+   Sticker business data: ONLY
+   - PATIENT_NAME
+   - HN
+   - MEDICINE_NAME
+   - DOSE_COUNT
+
+   QR may carry JSON, query-string, or
+   pipe-delimited values in this order:
+   patient_name | hn | medicine_name | dose_count
+========================================= */
+
+const DISPENSE_HEADERS = [
+  "DISPENSE_ID", "REF_NO", "PATIENT_NAME", "HN",
+  "MEDICINE_NAME", "DOSE_COUNT", "LOT", "EXP", "CODE", "USER", "TIME", "QR_RAW"
+];
+
+function cleanText(value) {
+  return String(value ?? "").trim();
+}
+
+function parseDose(value) {
+  const n = Number(String(value ?? "").replace(/,/g, "").trim());
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function parseStickerPayload(raw) {
+  const text = cleanText(raw);
+  if (!text) return null;
+
+  // 1) JSON QR payload
+  try {
+    const obj = JSON.parse(text);
+    if (obj && typeof obj === "object") {
+      return {
+        patient_name: cleanText(obj.patient_name ?? obj.patientName ?? obj.name),
+        hn: cleanText(obj.hn ?? obj.HN),
+        medicine_name: cleanText(obj.medicine_name ?? obj.medicineName ?? obj.medicine ?? obj.drug),
+        dose_count: parseDose(obj.dose_count ?? obj.doseCount ?? obj.dose ?? obj.qty ?? obj.quantity)
+      };
+    }
+  } catch (_) {}
+
+  // 2) query-string QR payload
+  if (text.includes("=") && /(?:^|[?&])(?:hn|patient_name|patientName|medicine_name|medicine|dose_count|dose|qty)=/i.test(text)) {
+    try {
+      const query = text.includes("?") ? text.slice(text.indexOf("?") + 1) : text;
+      const params = new URLSearchParams(query);
+      return {
+        patient_name: cleanText(params.get("patient_name") || params.get("patientName") || params.get("name")),
+        hn: cleanText(params.get("hn") || params.get("HN")),
+        medicine_name: cleanText(params.get("medicine_name") || params.get("medicineName") || params.get("medicine") || params.get("drug")),
+        dose_count: parseDose(params.get("dose_count") || params.get("doseCount") || params.get("dose") || params.get("qty") || params.get("quantity"))
+      };
+    } catch (_) {}
+  }
+
+  // 3) simple pipe-delimited payload
+  const parts = text.split("|").map(cleanText);
+  if (parts.length >= 4) {
+    return {
+      patient_name: parts[0],
+      hn: parts[1],
+      medicine_name: parts[2],
+      dose_count: parseDose(parts[3])
+    };
+  }
+
+  return null;
+}
+
+function validateStickerData(data) {
+  if (!data) return "รูปแบบข้อมูล Sticker ไม่รองรับ";
+  if (!data.patient_name) return "ไม่พบชื่อผู้รับบริการใน Sticker";
+  if (!data.hn) return "ไม่พบ HN ใน Sticker";
+  if (!data.medicine_name) return "ไม่พบชื่อยา/วัคซีนใน Sticker";
+  if (!data.dose_count) return "ไม่พบจำนวนโดสใน Sticker";
+  return null;
+}
+
+async function getAvailableDispenseLots(medicineName) {
+  const targetName = cleanText(medicineName);
+  if (!targetName) return [];
+
+  const movementRows = await getValues("INVENTORY_MOVEMENT!A:P");
+  const movementHeader = movementRows[0] || [];
+  const movementIndex = Object.fromEntries(
+    movementHeader.map((h, i) => [String(h).trim().toUpperCase(), i])
+  );
+  const getMovement = (row, name) => row[movementIndex[name]] ?? "";
+  const groups = new Map();
+
+  for (const row of movementRows.slice(1)) {
+    const name = cleanText(getMovement(row, "NAME"));
+    const lot = cleanText(getMovement(row, "LOT"));
+    if (!name || !lot || name.toLowerCase() !== targetName.toLowerCase()) continue;
+
+    const code = cleanText(getMovement(row, "CODE"));
+    const exp = cleanText(getMovement(row, "EXP"));
+    const type = cleanText(getMovement(row, "TYPE")).toUpperCase();
+    const qty = Number(String(getMovement(row, "QTY")).replace(/,/g, "")) || 0;
+    const key = `${code}||${lot}`;
+
+    if (!groups.has(key)) groups.set(key, { code, lot, exp, balance: 0 });
+    const item = groups.get(key);
+    if (exp) item.exp = exp;
+    item.balance += type === "OUT" ? -qty : qty;
+  }
+
+  // Previous DISPENSE transactions also consume the available balance.
+  // This keeps the selectable Lot list synchronized with actual dispensing.
+  let dispenseRows = [];
+  try {
+    dispenseRows = await getValues("INVENTORY_DISPENSE!A:L");
+  } catch (_) {
+    dispenseRows = [];
+  }
+
+  const dispenseHeader = dispenseRows[0] || [];
+  const dispenseIndex = Object.fromEntries(
+    dispenseHeader.map((h, i) => [String(h).trim().toUpperCase(), i])
+  );
+  const getDispense = (row, name) => row[dispenseIndex[name]] ?? "";
+
+  for (const row of dispenseRows.slice(1)) {
+    const name = cleanText(getDispense(row, "MEDICINE_NAME"));
+    const lot = cleanText(getDispense(row, "LOT"));
+    if (!name || !lot || name.toLowerCase() !== targetName.toLowerCase()) continue;
+
+    const code = cleanText(getDispense(row, "CODE"));
+    const qty = Number(String(getDispense(row, "DOSE_COUNT")).replace(/,/g, "")) || 0;
+    const key = `${code}||${lot}`;
+    const item = groups.get(key);
+    if (item) item.balance -= qty;
+  }
+
+  return [...groups.values()]
+    .filter(x => x.balance > 0)
+    .sort((a, b) => String(a.lot).localeCompare(String(b.lot), undefined, { numeric: true }));
+}
+
+async function nextDispenseRefNo() {
+  const yearMonth = new Date().toISOString().slice(0, 7).replace("-", "");
+  let rows = [];
+  try {
+    rows = await getValues("INVENTORY_DISPENSE!A:L");
+  } catch (_) {}
+
+  let max = 0;
+  for (const row of rows.slice(1)) {
+    const ref = String(row[1] || "");
+    const m = ref.match(new RegExp(`^DSP-${yearMonth}-(\\d+)$`));
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+
+  return `DSP-${yearMonth}-${String(max + 1).padStart(5, "0")}`;
+}
+
+app.get("/api/dispense/lookup/:id", requireAuth, async (req, res) => {
+  try {
+    const raw = decodeURIComponent(String(req.params.id || "")).trim();
+    const data = parseStickerPayload(raw);
+    const validationError = validateStickerData(data);
+
+    if (validationError) {
+      return res.status(422).json({
+        success: false,
+        code: "INVALID_STICKER",
+        message: validationError
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        patient_name: data.patient_name,
+        hn: data.hn,
+        medicine_name: data.medicine_name,
+        dose_count: data.dose_count,
+        qr_raw: raw
+      }
+    });
+  } catch (err) {
+    console.error("DISPENSE LOOKUP ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "ไม่สามารถอ่าน Sticker ได้"
+    });
+  }
+});
+
+app.get("/api/dispense/lots", requireAuth, async (req, res) => {
+  try {
+    const medicineName = cleanText(req.query?.medicine_name);
+    if (!medicineName) {
+      return res.status(400).json({ success: false, message: "กรุณาระบุชื่อยา/วัคซีน" });
+    }
+
+    const lots = await getAvailableDispenseLots(medicineName);
+    return res.json({ success: true, data: lots });
+  } catch (err) {
+    console.error("DISPENSE LOT LOOKUP ERROR:", err);
+    return res.status(500).json({ success: false, message: err.message || "ไม่สามารถค้นหา Lot ได้" });
+  }
+});
+
+app.post("/api/dispense", requireAuth, async (req, res) => {
+  try {
+    const data = {
+      patient_name: cleanText(req.body?.patient_name),
+      hn: cleanText(req.body?.hn),
+      medicine_name: cleanText(req.body?.medicine_name),
+      dose_count: parseDose(req.body?.dose_count),
+      lot: cleanText(req.body?.lot)
+    };
+
+    const validationError = validateStickerData(data);
+    if (validationError) {
+      return res.status(400).json({ success: false, message: validationError });
+    }
+    if (!data.lot) {
+      return res.status(400).json({ success: false, message: "กรุณาเลือก Lot" });
+    }
+
+    // Always resolve Lot / EXP / CODE from Inventory on the server.
+    // Do not trust values sent back by the browser.
+    const availableLots = await getAvailableDispenseLots(data.medicine_name);
+    const selectedLot = availableLots.find(x => String(x.lot).trim() === data.lot);
+
+    if (!selectedLot) {
+      return res.status(409).json({
+        success: false,
+        code: "LOT_NOT_AVAILABLE",
+        message: "Lot ที่เลือกไม่มี Stock แล้ว หรือไม่ตรงกับยา/วัคซีนที่เลือก"
+      });
+    }
+
+    if (data.dose_count > Number(selectedLot.balance)) {
+      return res.status(409).json({
+        success: false,
+        code: "INSUFFICIENT_STOCK",
+        message: `Lot ${selectedLot.lot} คงเหลือ ${selectedLot.balance} แต่ต้องจ่าย ${data.dose_count}`
+      });
+    }
+
+    if (!selectedLot.exp) {
+      return res.status(409).json({
+        success: false,
+        code: "LOT_EXP_MISSING",
+        message: "Lot ที่เลือกไม่มีข้อมูล EXP ใน Inventory"
+      });
+    }
+
+    await ensureSheet("INVENTORY_DISPENSE", DISPENSE_HEADERS);
+
+    const refNo = await nextDispenseRefNo();
+    const dispenseId = `DO${Date.now()}`;
+    const now = new Date().toISOString();
+    const qrRaw = cleanText(req.body?.qr_raw);
+
+    const sheets = await sheetsApi();
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: "INVENTORY_DISPENSE!A:L",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[
+          dispenseId,
+          refNo,
+          data.patient_name,
+          data.hn,
+          data.medicine_name,
+          data.dose_count,
+          selectedLot.lot,
+          selectedLot.exp,
+          selectedLot.code,
+          req.user.full_name,
+          now,
+          qrRaw
+        ]]
+      }
+    });
+
+    return res.json({
+      success: true,
+      dispense_id: dispenseId,
+      ref_no: refNo,
+      data: {
+        ...data,
+        lot: selectedLot.lot,
+        exp: selectedLot.exp,
+        code: selectedLot.code,
+        balance_before: selectedLot.balance,
+        balance_after: selectedLot.balance - data.dose_count
+      }
+    });
+  } catch (err) {
+    console.error("DISPENSE SAVE ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "บันทึกการจ่ายยาไม่สำเร็จ"
+    });
+  }
+});
+
 /* =========================================
    STARTUP
 ========================================= */

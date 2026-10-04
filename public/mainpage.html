@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-StockScan | Mainpage</title>
+  <link rel="icon" href="/icon.png">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    :root{font-family:"Prompt",system-ui,sans-serif}
+    body{background:#f1f5f9}
+    .main-wrap{max-width:760px;margin:0 auto;padding:22px 16px 40px}
+    .hero{background:linear-gradient(135deg,#0f766e,#0f766e 55%,#155e75);color:#fff;border-radius:22px;padding:26px 24px;box-shadow:0 12px 30px rgba(15,118,110,.18);margin-bottom:18px}
+    .hero h1{margin:0 0 6px;font-size:28px}.hero p{margin:0;opacity:.9}
+    .user-row{margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.2);display:flex;align-items:center;gap:12px}
+    .avatar{width:46px;height:46px;border-radius:50%;object-fit:cover;background:rgba(255,255,255,.2)}
+    .menu{display:grid;gap:14px}
+    .menu-btn{border:0;text-align:left;background:#fff;border-radius:20px;padding:20px;cursor:pointer;box-shadow:0 8px 22px rgba(15,23,42,.08);display:flex;gap:16px;align-items:center;transition:.15s}
+    .menu-btn:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(15,23,42,.12)}
+    .icon{width:58px;height:58px;border-radius:16px;display:grid;place-items:center;font-size:30px;background:#ecfeff}
+    .menu-btn h2{margin:0 0 4px;font-size:20px;color:#0f172a}.menu-btn p{margin:0;color:#64748b;font-size:14px}
+    .admin{margin-top:14px;display:none}
+    .footer{margin-top:22px;text-align:center}.logout{border:0;background:#fee2e2;color:#991b1b;border-radius:12px;padding:11px 20px;font-weight:700;cursor:pointer}
+  </style>
+</head>
+<body>
+  <main class="main-wrap">
+    <section class="hero">
+      <h1>📦 E-StockScan</h1>
+      <p>เลือกงานที่ต้องการดำเนินการ</p>
+      <div class="user-row">
+        <img id="avatar" class="avatar" alt="">
+        <div>
+          <strong id="userName">กำลังโหลด...</strong><br>
+          <small id="userPosition"></small>
+        </div>
+      </div>
+    </section>
+
+    <section class="menu">
+      <button class="menu-btn" id="sessionBtn" type="button">
+        <div class="icon">📋</div>
+        <div>
+          <h2>SESSION</h2>
+          <p>Emergency Check List · ตรวจนับ Stock และเปรียบเทียบ Required / Actual</p>
+        </div>
+      </button>
+
+      <button class="menu-btn" id="dispenseBtn" type="button">
+        <div class="icon">💊</div>
+        <div>
+          <h2>DISPENSE</h2>
+          <p>Scan Sticker ยา · ตรวจสอบรายการและจำนวนก่อนตัดออกจาก Inventory</p>
+        </div>
+      </button>
+    </section>
+
+    <button class="menu-btn admin" id="adminBtn" type="button">
+      <div class="icon">⚙️</div>
+      <div><h2>ADMIN</h2><p>จัดการผู้ใช้งานและสิทธิ์</p></div>
+    </button>
+
+    <div class="footer">
+      <button class="logout" id="logoutBtn" type="button">ออกจากระบบ</button>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script>
+    async function api(url, options={}){
+      const res=await fetch(url,{credentials:"include",...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
+      let data={}; try{data=await res.json()}catch{}
+      if(!res.ok){const e=new Error(data.message||"เกิดข้อผิดพลาด");e.status=res.status;throw e}
+      return data;
+    }
+
+    async function init(){
+      try{
+        const data=await api("/api/auth/me");
+        const u=data.user||{};
+        document.getElementById("userName").textContent=u.FULL_NAME_TH||u.full_name_th||u.FULL_NAME_EN||u.full_name||u.USERNAME||"-";
+        document.getElementById("userPosition").textContent=u.POSITION||u.position||u.ROLE||u.role||"";
+        const pic=u.LINE_PICTURE_URL||u.line_picture_url||"";
+        if(pic) document.getElementById("avatar").src=pic;
+        if(String(u.ROLE||u.role||"USER").toUpperCase()==="ADMIN") document.getElementById("adminBtn").style.display="flex";
+      }catch(e){ location.href="/index.html"; return; }
+    }
+
+    document.getElementById("sessionBtn").onclick=()=>location.href="/session.html";
+    document.getElementById("dispenseBtn").onclick=()=>location.href="/dispense.html";
+    document.getElementById("adminBtn").onclick=()=>location.href="/admin-users.html";
+    document.getElementById("logoutBtn").onclick=async()=>{
+      try{await api("/api/auth/logout",{method:"POST"})}finally{location.href="/index.html"}
+    };
+    init();
+  </script>
+</body>
+</html>

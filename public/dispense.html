@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dispense | E-StockScan</title><link rel="icon" href="/icon.png"><link rel="stylesheet" href="./style.css">
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script><script src="https://unpkg.com/html5-qrcode"></script>
+<style>
+body{background:#f1f5f9;font-family:"Prompt",system-ui,sans-serif}.disp-wrap{max-width:760px;margin:auto;padding:18px 14px 40px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px}.top h1{font-size:23px;margin:0;color:#0f172a}.back{border:0;background:#fff;border-radius:10px;padding:9px 13px;cursor:pointer}.card{background:#fff;border-radius:18px;padding:16px;box-shadow:0 8px 22px rgba(15,23,42,.08);margin-top:14px}.reader{overflow:hidden;border-radius:14px}.muted{color:#64748b}.field{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid #e2e8f0}.field span{color:#64748b}.field strong{color:#0f172a;text-align:right;word-break:break-word}.label{display:block;font-weight:700;color:#334155;margin:14px 0 7px}.select{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:11px;background:#fff;font:inherit}.confirm{width:100%;border:0;border-radius:12px;padding:13px;margin-top:16px;background:#0f766e;color:#fff;font-weight:800;cursor:pointer}.scan-again{width:100%;border:1px solid #cbd5e1;border-radius:12px;padding:12px;margin-top:10px;background:#fff;color:#0f172a;font-weight:700;cursor:pointer}.lot-info{margin-top:9px;padding:10px 12px;background:#f8fafc;border-radius:10px;color:#475569;font-size:14px}.danger{color:#b91c1c}
+</style>
+</head>
+<body><main class="disp-wrap">
+<div class="top"><h1>💊 DISPENSE</h1><button class="back" id="backBtn">← Mainpage</button></div>
+<section class="card"><div id="reader" class="reader"></div><p id="scanHint" class="muted">สแกน Sticker เพื่ออ่านข้อมูล 4 รายการ</p></section>
+<section id="preview" class="card" style="display:none"></section>
+</main>
+<script type="module">
+import {getDispenseItem,getDispenseLots,submitDispense} from "./modules/dispense.js";
+let scanner=null,locked=false,lastScan="",item=null,lots=[],selectedLot=null; const $=id=>document.getElementById(id);
+$("backBtn").onclick=()=>location.href="/mainpage.html";
+async function showItem(qrValue){if(locked||qrValue===lastScan)return;locked=true;lastScan=qrValue;setTimeout(()=>{locked=false;lastScan=""},1200);try{if(scanner)await scanner.pause(true);item=await getDispenseItem(qrValue);lots=await getDispenseLots(item.medicine_name);selectedLot=null;render();}catch(e){if(scanner)await scanner.resume();Swal.fire({icon:"warning",title:"อ่านข้อมูลไม่สำเร็จ",text:e.message});}}
+function render(){const p=$("preview");p.style.display="block";p.innerHTML=`<h2 style="margin:0 0 10px">ตรวจสอบรายการจ่าย</h2>
+<label class="label">ชื่อผู้รับบริการ</label><input id="patientName" class="select" value="${esc(item.patient_name)}" readonly>
+<label class="label">HN</label><input id="hn" class="select" value="${esc(item.hn)}" readonly>
+<label class="label">ชื่อยา/วัคซีน</label><input id="medicineName" class="select" value="${esc(item.medicine_name)}" readonly>
+<label class="label">จำนวนโดส</label><input id="doseCount" class="select" value="${esc(item.dose_count)}" readonly>
+<label class="label" for="lotSelect">เลข Lot จาก Inventory</label><select id="lotSelect" class="select"><option value="">-- ผู้ตรวจเลือก Lot --</option>${lots.map((x,i)=>`<option value="${i}">${esc(x.lot)}</option>`).join("")}</select>
+<label class="label" for="exp">EXP</label><input id="exp" class="select" value="" placeholder="ระบบจะเติมอัตโนมัติ" readonly>
+<div id="lotInfo" class="lot-info">เลือก Lot เพื่อให้ระบบเติม EXP และตรวจสอบคงเหลือ</div>
+<button id="confirm" class="confirm">ยืนยันการจ่าย</button><button id="scanAgain" class="scan-again">สแกน Sticker ใหม่</button>`;
+$("lotSelect").onchange=()=>{const i=$("lotSelect").value;selectedLot=i===""?null:lots[Number(i)];$("exp").value=selectedLot?.exp||"";$("lotInfo").innerHTML=selectedLot?`Lot: <b>${esc(selectedLot.lot)}</b> &nbsp;|&nbsp; EXP: <b>${esc(selectedLot.exp)}</b> &nbsp;|&nbsp; คงเหลือ: <b>${esc(selectedLot.balance)}</b>`:`เลือก Lot เพื่อให้ระบบเติม EXP และตรวจสอบคงเหลือ`;};
+$("confirm").onclick=confirmDispense;$('scanAgain').onclick=async()=>{item=null;lots=[];selectedLot=null;p.style.display="none";if(scanner)await scanner.resume();};
+if(!lots.length){$("lotInfo").innerHTML='<span class="danger">ไม่พบ Lot ที่มี Stock สำหรับรายการนี้</span>';$('confirm').disabled=true;$('confirm').style.opacity=.5;}}
+async function confirmDispense(){if(!item||!selectedLot)return Swal.fire({icon:"warning",title:"กรุณาเลือก Lot",text:"ผู้ตรวจต้องเลือก Lot จาก Inventory ก่อนยืนยันการจ่าย"});if(Number(item.dose_count)>Number(selectedLot.balance))return Swal.fire({icon:"warning",title:"Stock ไม่พอ",text:`Lot ${selectedLot.lot} คงเหลือ ${selectedLot.balance} แต่ต้องจ่าย ${item.dose_count}`});const ok=await Swal.fire({icon:"question",title:"ยืนยันการจ่าย?",html:`${esc(item.patient_name)}<br>HN: <b>${esc(item.hn)}</b><br>${esc(item.medicine_name)}<br>จำนวน <b>${esc(item.dose_count)}</b> โดส<br>Lot: <b>${esc(selectedLot.lot)}</b><br>EXP: <b>${esc(selectedLot.exp)}</b>`,showCancelButton:true,confirmButtonText:"ยืนยัน",cancelButtonText:"ยกเลิก"});if(!ok.isConfirmed)return;try{const result=await submitDispense({...item,lot:selectedLot.lot,exp:selectedLot.exp,code:selectedLot.code});await Swal.fire({icon:"success",title:"บันทึกการจ่ายสำเร็จ",text:`เลขที่ ${result.ref_no}`,confirmButtonText:"สแกนรายการถัดไป"});item=null;lots=[];selectedLot=null;$("preview").style.display="none";if(scanner)await scanner.resume();}catch(e){Swal.fire({icon:"error",title:"บันทึกไม่สำเร็จ",text:e.message});}}
+function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#039;","\"":"&quot;"}[c]));}
+async function init(){try{await fetch("/api/auth/me",{credentials:"include"}).then(r=>{if(!r.ok)throw new Error()});}catch{location.href="/index.html";return;}scanner=new Html5Qrcode("reader");try{await scanner.start({facingMode:"environment"},{fps:10,qrbox:(w,h)=>({width:Math.min(w,320),height:Math.min(h,320)})},showItem);}catch(e){Swal.fire({icon:"error",title:"เปิดกล้องไม่ได้",text:e.message});}}init();
+</script></body></html>
