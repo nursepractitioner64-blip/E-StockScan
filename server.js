@@ -1891,65 +1891,112 @@ function validateStickerData(data) {
   return null;
 }
 
+function normalizeMedicineName(value) {
+  return cleanText(value)
+    .toLowerCase()
+    .replace(/วัคซีน|vaccine|medicine|medication|ชื่อยา|ชื่อวัคซีน/g, "")
+    .replace(/[\s\-_.(),/\\:;|]+/g, "")
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function normalizeMovementType(value) {
+  const type = cleanText(value).toUpperCase();
+  if (["OUT", "ISSUE", "DISPENSE", "เบิก", "จ่าย", "เบิกจ่าย", "ตัดสต็อก"].includes(type)) return "OUT";
+  if (["IN", "RECEIVE", "RECEIVED", "รับ", "รับเข้า", "เติมสต็อก"].includes(type)) return "IN";
+  return type;
+}
+
 async function getAvailableDispenseLots(medicineName) {
   const targetName = cleanText(medicineName);
-  if (!targetName) return [];
+  const targetNorm = normalizeMedicineName(targetName);
+  if (!targetNorm) return [];
 
   const movementRows = await getValues("INVENTORY_MOVEMENT!A:P");
+  if (!Array.isArray(movementRows) || movementRows.length < 2) return [];
+
   const movementHeader = movementRows[0] || [];
   const movementIndex = Object.fromEntries(
     movementHeader.map((h, i) => [String(h).trim().toUpperCase(), i])
   );
   const getMovement = (row, name) => row[movementIndex[name]] ?? "";
+  const rows = movementRows.slice(1).map(row => ({
+    name: cleanText(getMovement(row, "NAME")),
+    normalizedName: normalizeMedicineName(getMovement(row, "NAME")),
+    code: cleanText(getMovement(row, "CODE")),
+    lot: cleanText(getMovement(row, "LOT")),
+    exp: cleanText(getMovement(row, "EXP")),
+    type: normalizeMovementType(getMovement(row, "TYPE")),
+    qty: Number(String(getMovement(row, "QTY")).replace(/,/g, "")) || 0
+  })).filter(x => x.name && x.normalizedName && x.lot);
+
+  // OCR often adds/removes spaces or prefixes. Match exact normalized names first;
+  // allow partial matching only when it identifies one unique inventory name.
+  const inventoryNames = [...new Set(rows.map(x => x.name))];
+  let matchedNames = inventoryNames.filter(name => normalizeMedicineName(name) === targetNorm);
+  if (!matchedNames.length) {
+    const partial = inventoryNames.filter(name => {
+      const n = normalizeMedicineName(name);
+      return n && (n.includes(targetNorm) || targetNorm.includes(n));
+    });
+    if (partial.length) {
+      const longest = Math.max(...partial.map(name => normalizeMedicineName(name).length));
+      matchedNames = partial.filter(name => normalizeMedicineName(name).length === longest);
+    }
+  }
+  const matchedSet = new Set(matchedNames);
+  const matchedNormalizedNames = new Set(matchedNames.map(normalizeMedicineName));
+  if (!matchedSet.size) {
+    console.warn("DISPENSE LOTS: no inventory name match", {
+      scannedName: targetName,
+      inventoryNames: inventoryNames.slice(0, 30)
+    });
+    return [];
+  }
+
   const groups = new Map();
-
-  for (const row of movementRows.slice(1)) {
-    const name = cleanText(getMovement(row, "NAME"));
-    const lot = cleanText(getMovement(row, "LOT"));
-    if (!name || !lot || name.toLowerCase() !== targetName.toLowerCase()) continue;
-
-    const code = cleanText(getMovement(row, "CODE"));
-    const exp = cleanText(getMovement(row, "EXP"));
-    const type = cleanText(getMovement(row, "TYPE")).toUpperCase();
-    const qty = Number(String(getMovement(row, "QTY")).replace(/,/g, "")) || 0;
-    const key = `${code}||${lot}`;
-
-    if (!groups.has(key)) groups.set(key, { code, lot, exp, balance: 0 });
+  for (const row of rows) {
+    if (!matchedSet.has(row.name)) continue;
+    const key = `${row.code}||${row.lot}`;
+    if (!groups.has(key)) groups.set(key, {
+      code: row.code, lot: row.lot, exp: row.exp, balance: 0, name: row.name
+    });
     const item = groups.get(key);
-    if (exp) item.exp = exp;
-    item.balance += type === "OUT" ? -qty : qty;
+    if (row.exp) item.exp = row.exp;
+    if (row.type === "OUT") item.balance -= row.qty;
+    else if (row.type === "IN") item.balance += row.qty;
+    else console.warn("DISPENSE LOTS: ignored unknown movement type", row.type, row.name, row.lot);
   }
 
-  // Previous DISPENSE transactions also consume the available balance.
-  // This keeps the selectable Lot list synchronized with actual dispensing.
+  // Deduct previous dispensing records from the same medicine and LOT.
   let dispenseRows = [];
-  try {
-    dispenseRows = await getValues("INVENTORY_DISPENSE!A:L");
-  } catch (_) {
-    dispenseRows = [];
+  try { dispenseRows = await getValues("INVENTORY_DISPENSE!A:L"); } catch (_) {}
+  if (Array.isArray(dispenseRows) && dispenseRows.length > 1) {
+    const dispenseHeader = dispenseRows[0] || [];
+    const dispenseIndex = Object.fromEntries(
+      dispenseHeader.map((h, i) => [String(h).trim().toUpperCase(), i])
+    );
+    const getDispense = (row, name) => row[dispenseIndex[name]] ?? "";
+    for (const row of dispenseRows.slice(1)) {
+      const name = cleanText(getDispense(row, "MEDICINE_NAME"));
+      const lot = cleanText(getDispense(row, "LOT"));
+      if (!name || !lot || !matchedNormalizedNames.has(normalizeMedicineName(name))) continue;
+      const code = cleanText(getDispense(row, "CODE"));
+      const qty = Number(String(getDispense(row, "DOSE_COUNT")).replace(/,/g, "")) || 0;
+      const item = groups.get(`${code}||${lot}`);
+      if (item) item.balance -= qty;
+    }
   }
 
-  const dispenseHeader = dispenseRows[0] || [];
-  const dispenseIndex = Object.fromEntries(
-    dispenseHeader.map((h, i) => [String(h).trim().toUpperCase(), i])
-  );
-  const getDispense = (row, name) => row[dispenseIndex[name]] ?? "";
-
-  for (const row of dispenseRows.slice(1)) {
-    const name = cleanText(getDispense(row, "MEDICINE_NAME"));
-    const lot = cleanText(getDispense(row, "LOT"));
-    if (!name || !lot || name.toLowerCase() !== targetName.toLowerCase()) continue;
-
-    const code = cleanText(getDispense(row, "CODE"));
-    const qty = Number(String(getDispense(row, "DOSE_COUNT")).replace(/,/g, "")) || 0;
-    const key = `${code}||${lot}`;
-    const item = groups.get(key);
-    if (item) item.balance -= qty;
-  }
-
-  return [...groups.values()]
+  const available = [...groups.values()]
     .filter(x => x.balance > 0)
     .sort((a, b) => String(a.lot).localeCompare(String(b.lot), undefined, { numeric: true }));
+  console.log("DISPENSE LOTS RESULT:", {
+    scannedName: targetName,
+    matchedNames,
+    lotCount: available.length,
+    lots: available.map(x => ({ code: x.code, lot: x.lot, balance: x.balance }))
+  });
+  return available;
 }
 
 async function nextDispenseRefNo() {
