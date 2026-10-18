@@ -547,7 +547,34 @@ function clean(value) {
       })[char]);
     }
 
-    function render() {
+    async function searchLots() {
+  const medicineName = $("medicineName")?.value?.trim() || "";
+  if (!medicineName) {
+    return Swal.fire({ icon: "warning", title: "กรุณาระบุชื่อยา/วัคซีน" });
+  }
+  try {
+    $("searchLotsBtn").disabled = true;
+    $("lotInfo").textContent = "กำลังค้นหา LOT...";
+    item.medicine_name = medicineName;
+    item.patient_name = $("patientName").value.trim();
+    item.dose_count = String($("doseCount").value).trim();
+    lots = await getDispenseLots(medicineName);
+    selectedLot = null;
+    $("lotSelect").innerHTML = '<option value="">-- ผู้ตรวจเลือก LOT --</option>' +
+      lots.map((lot, index) => `<option value="${index}">${esc(lot.name || medicineName)} | ${esc(lot.lot)} — คงเหลือ ${esc(lot.balance)}</option>`).join("");
+    $("exp").value = "";
+    $("confirm").disabled = true;
+    $("lotInfo").textContent = lots.length
+      ? `พบ ${lots.length} LOT สำหรับ ${medicineName} กรุณาตรวจชื่อยาและเลือก LOT`
+      : "ไม่พบ LOT ที่มียาคงเหลือ กรุณาตรวจชื่อยา หรือเลือกชื่อยาจากฐานข้อมูล";
+  } catch (e) {
+    $("lotInfo").textContent = e.message || "ค้นหา LOT ไม่สำเร็จ";
+  } finally {
+    $("searchLotsBtn").disabled = false;
+  }
+}
+
+function render() {
 
 const preview = $("preview");
 
@@ -559,13 +586,13 @@ preview.innerHTML = `
 
 <p class="status">กรุณาตรวจชื่อผู้รับบริการ ชื่อวัคซีน และจำนวนโดสให้ถูกต้องก่อนจ่าย</p>
 
-<div class="field"><label class="label" for="patientName">ชื่อผู้รับบริการ</label><input id="patientName" class="input" value="${esc(item.patient_name)}" readonly></div>
+<div class="field"><label class="label" for="patientName">ชื่อผู้รับบริการ</label><input id="patientName" class="input" value="${esc(item.patient_name)}"></div>
 
-<div class="field"><label class="label" for="medicineName">ชื่อยา/วัคซีน</label><input id="medicineName" class="input" value="${esc(item.medicine_name)}" readonly></div>
+<div class="field"><label class="label" for="medicineName">ชื่อยา/วัคซีน</label><input id="medicineName" class="input" value="${esc(item.medicine_name)}"></div>
 
-<div class="field"><label class="label" for="doseCount">จำนวนโดส</label><input id="doseCount" class="input" value="${esc(item.dose_count)}" readonly></div>
+<div class="field"><label class="label" for="doseCount">จำนวนโดส</label><input id="doseCount" class="input" value="${esc(item.dose_count)}" inputmode="numeric"></div>
 
-<div class="field"><label class="label" for="lotSelect">Lot จาก INVENTORY_MOVEMENT</label>
+<div class="field"><label class="label" for="lotSelect">Lot จาก INVENTORY_MOVEMENT</label><button id="searchLotsBtn" class="scan-again" type="button">🔎 ค้นหา LOT จากชื่อยาที่กรอก</button>
 
 <select id="lotSelect" class="select"><option value="">-- ผู้ตรวจเลือก Lot --</option>${lots.map((lot, index) => `<option value="${index}">${esc(lot.lot)} — คงเหลือ ${esc(lot.balance)}</option>`).join("")}</select>
 
@@ -583,6 +610,15 @@ preview.innerHTML = `
 
 
 
+$("searchLotsBtn").onclick = searchLots;
+$("medicineName").addEventListener("input", () => {
+  selectedLot = null;
+  lots = [];
+  $("confirm").disabled = true;
+  $("exp").value = "";
+  $("lotSelect").innerHTML = '<option value="">แก้ไขชื่อยาแล้ว กรุณาค้นหา LOT ใหม่</option>';
+  $("lotInfo").textContent = "ชื่อยาเปลี่ยนแล้ว ต้องค้นหา LOT ใหม่";
+});
 $("lotSelect").onchange = () => {
 
 const index = $("lotSelect").value;
@@ -632,7 +668,11 @@ $("lotInfo").innerHTML = '<span class="danger">ไม่พบ Lot ที่ม�
 
 
 async function confirmDispense() {
-
+if (item) {
+  item.patient_name = $("patientName")?.value?.trim() || "";
+  item.medicine_name = $("medicineName")?.value?.trim() || "";
+  item.dose_count = String($("doseCount")?.value || "").trim();
+}
 if (!item || !selectedLot) {
 
 return Swal.fire({ icon: "warning", title: "กรุณาเลือก Lot", text: "ผู้ตรวจต้องเลือก Lot จาก Inventory ก่อนยืนยันการจ่าย" });

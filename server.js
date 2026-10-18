@@ -1911,7 +1911,7 @@ async function getAvailableDispenseLots(medicineName) {
   const targetNorm = normalizeMedicineName(targetName);
   if (!targetNorm) return [];
 
-  const movementRows = await getValues("INVENTORY_MOVEMENT!A:P");
+  const movementRows = await getValues("VACCINE_MOVEMENT!A:P");
   if (!Array.isArray(movementRows) || movementRows.length < 2) return [];
 
   const movementHeader = movementRows[0] || [];
@@ -1929,19 +1929,33 @@ async function getAvailableDispenseLots(medicineName) {
     qty: Number(String(getMovement(row, "QTY")).replace(/,/g, "")) || 0
   })).filter(x => x.name && x.normalizedName && x.lot);
 
-  // OCR often adds/removes spaces or prefixes. Match exact normalized names first;
-  // allow partial matching only when it identifies one unique inventory name.
+  // Alias สำหรับชื่อบน Sticker ที่ต่างจากชื่อใน VACCINE_MOVEMENT
+  const medicineAliases = new Map([
+    [normalizeMedicineName("Vaccine Speeda (FS1)"), "6SPEED0001BG"],
+    [normalizeMedicineName("Speeda FS1"), "6SPEED0001BG"],
+    [normalizeMedicineName("Speeda"), "6SPEED0001BG"]
+  ]);
+  const aliasCode = medicineAliases.get(targetNorm);
   const inventoryNames = [...new Set(rows.map(x => x.name))];
-  let matchedNames = inventoryNames.filter(name => normalizeMedicineName(name) === targetNorm);
-  if (!matchedNames.length) {
-    const partial = inventoryNames.filter(name => {
-      const n = normalizeMedicineName(name);
-      return n && (n.includes(targetNorm) || targetNorm.includes(n));
-    });
-    if (partial.length) {
-      const longest = Math.max(...partial.map(name => normalizeMedicineName(name).length));
-      matchedNames = partial.filter(name => normalizeMedicineName(name).length === longest);
+  let matchedCodes = new Set();
+  let matchedNames = [];
+
+  if (aliasCode) {
+    matchedCodes.add(aliasCode);
+    matchedNames = [...new Set(rows.filter(x => x.code === aliasCode).map(x => x.name))];
+  } else {
+    matchedNames = inventoryNames.filter(name => normalizeMedicineName(name) === targetNorm);
+    if (!matchedNames.length) {
+      const partial = inventoryNames.filter(name => {
+        const n = normalizeMedicineName(name);
+        return n.length >= 5 && targetNorm.length >= 5 && (n.includes(targetNorm) || targetNorm.includes(n));
+      });
+      const bestLength = partial.length ? Math.max(...partial.map(name => normalizeMedicineName(name).length)) : 0;
+      const best = partial.filter(name => normalizeMedicineName(name).length === bestLength);
+      const bestCodes = new Set(rows.filter(x => best.includes(x.name)).map(x => x.code));
+      if (bestCodes.size === 1) matchedNames = best;
     }
+    matchedCodes = new Set(rows.filter(x => matchedNames.includes(x.name)).map(x => x.code));
   }
   const matchedSet = new Set(matchedNames);
   const matchedNormalizedNames = new Set(matchedNames.map(normalizeMedicineName));
@@ -1955,7 +1969,7 @@ async function getAvailableDispenseLots(medicineName) {
 
   const groups = new Map();
   for (const row of rows) {
-    if (!matchedSet.has(row.name)) continue;
+    if (!matchedCodes.has(row.code)) continue;
     const key = `${row.code}||${row.lot}`;
     if (!groups.has(key)) groups.set(key, {
       code: row.code, lot: row.lot, exp: row.exp, balance: 0, name: row.name
@@ -1979,10 +1993,12 @@ async function getAvailableDispenseLots(medicineName) {
     for (const row of dispenseRows.slice(1)) {
       const name = cleanText(getDispense(row, "MEDICINE_NAME"));
       const lot = cleanText(getDispense(row, "LOT"));
-      if (!name || !lot || !matchedNormalizedNames.has(normalizeMedicineName(name))) continue;
+      if (!lot) continue;
       const code = cleanText(getDispense(row, "CODE"));
+      const nameMatches = name && matchedNormalizedNames.has(normalizeMedicineName(name));
+      if (code ? !matchedCodes.has(code) : !nameMatches) continue;
       const qty = Number(String(getDispense(row, "DOSE_COUNT")).replace(/,/g, "")) || 0;
-      const item = groups.get(`${code}||${lot}`);
+      const item = groups.get(`${code}||${lot}`) || [...groups.values()].find(x => x.lot === lot && (!code || x.code === code));
       if (item) item.balance -= qty;
     }
   }
