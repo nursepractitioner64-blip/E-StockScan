@@ -1,0 +1,7 @@
+Date format update: MM/DD/YYYY
+
+- New VACCINE_MOVEMENT DATE values are written as MM/DD/YYYY.
+- EXP values returned to scanner and Dispense screens are normalized to MM/DD/YYYY.
+- New DISPENSE rows write EXP in MM/DD/YYYY.
+- Existing spreadsheet rows are not bulk-rewritten automatically; the app normalizes recognized dates when displaying them.
+- Ambiguous slash dates where both day and month are 12 or less are interpreted as MM/DD/YYYY.

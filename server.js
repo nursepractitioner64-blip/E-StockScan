@@ -1783,6 +1783,8 @@ function mapRow(row = []) {
   }
 
   obj.qty = Number(obj.qty || 0);
+  obj.exp = formatDateMDY(obj.exp);
+  if (obj.date) obj.date = formatDateMDY(obj.date);
 
   return obj;
 }
@@ -1999,6 +2001,47 @@ const DISPENSE_MOVEMENT_HEADERS = [
   "LOT", "EXP", "TARGET", "USER", "TIME", "REMARK", "Location", "QRCODE"
 ];
 
+// Normalize date-only values for display/storage as MM/DD/YYYY.
+// ISO dates are read as YYYY-MM-DD. Existing slash dates with an unambiguous
+// day (>12) are interpreted as DD/MM/YYYY; otherwise the target US format is assumed.
+function formatDateMDY(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Bangkok", month: "2-digit", day: "2-digit", year: "numeric"
+    }).formatToParts(value);
+    const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
+    return `${p.month}/${p.day}/${p.year}`;
+  }
+  const text = String(value).trim();
+  if (!text) return "";
+  let year, month, day;
+  let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[T\s].*)?$/);
+  if (m) {
+    year = Number(m[1]); month = Number(m[2]); day = Number(m[3]);
+  } else {
+    m = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (m) {
+      const a = Number(m[1]), b = Number(m[2]); year = Number(m[3]);
+      if (a > 12 && b <= 12) { day = a; month = b; }
+      else if (b > 12 && a <= 12) { month = a; day = b; }
+      else { month = a; day = b; } // ambiguous values follow requested MM/DD/YYYY
+    } else {
+      const parsed = new Date(text);
+      if (Number.isNaN(parsed.getTime())) return text;
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Bangkok", month: "2-digit", day: "2-digit", year: "numeric"
+      }).formatToParts(parsed);
+      const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
+      return `${p.month}/${p.day}/${p.year}`;
+    }
+  }
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (month < 1 || month > 12 || day < 1 || day > 31 ||
+      d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return text;
+  return `${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${year}`;
+}
+
 function cleanText(value) {
   return String(value ?? "").trim();
 }
@@ -2095,7 +2138,7 @@ async function getAvailableDispenseLots(medicineName) {
     normalizedName: normalizeMedicineName(getMovement(row, "NAME")),
     code: cleanText(getMovement(row, "CODE")),
     lot: cleanText(getMovement(row, "LOT")),
-    exp: cleanText(getMovement(row, "EXP")),
+    exp: formatDateMDY(cleanText(getMovement(row, "EXP"))),
     unit: cleanText(getMovement(row, "UNIT")),
     refNo: cleanText(getMovement(row, "REF_NO")),
     type: normalizeMovementType(getMovement(row, "TYPE")),
@@ -2367,7 +2410,7 @@ app.post("/api/dispense", requireAuth, async (req, res) => {
       data.medicine_name,
       data.dose_count,
       selectedLot.lot,
-      selectedLot.exp,
+      formatDateMDY(selectedLot.exp),
       selectedLot.code,
       req.user.full_name,
       now,
@@ -2377,7 +2420,7 @@ app.post("/api/dispense", requireAuth, async (req, res) => {
     // บันทึก movement ออกลง VACCINE_MOVEMENT ตามโครงสร้าง 16 คอลัมน์ที่กำหนด
     await ensureSheet("VACCINE_MOVEMENT", DISPENSE_MOVEMENT_HEADERS);
     const movementId = await nextMovementId();
-    const movementDate = now.slice(0, 10);
+    const movementDate = formatDateMDY(new Date());
     const movementValues = [[
       movementId,                         // MOVEMENT_ID
       "OUT",                              // TYPE
@@ -2388,7 +2431,7 @@ app.post("/api/dispense", requireAuth, async (req, res) => {
       data.dose_count,                    // QTY
       selectedLot.unit || "DOSE",        // UNIT
       selectedLot.lot,                    // LOT
-      selectedLot.exp,                    // EXP
+      formatDateMDY(selectedLot.exp),      // EXP (MM/DD/YYYY)
       [data.patient_name, data.hn].filter(Boolean).join(" / "), // TARGET
       req.user.full_name,                 // USER
       now,                                // TIME
@@ -2474,7 +2517,7 @@ app.post("/api/dispense", requireAuth, async (req, res) => {
       data: {
         ...data,
         lot: selectedLot.lot,
-        exp: selectedLot.exp,
+        exp: formatDateMDY(selectedLot.exp),
         code: selectedLot.code,
         balance_before: selectedLot.balance,
         balance_after: selectedLot.balance - data.dose_count

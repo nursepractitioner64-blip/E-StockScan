@@ -133,6 +133,14 @@ body{background:#f1f5f9;font-family:"Prompt",system-ui,sans-serif}
 
 
 <script type="module">
+function formatDateMDY(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const text=String(value).trim(); let m=text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[T\s].*)?$/); let year,month,day;
+  if(m){year=+m[1];month=+m[2];day=+m[3];} else {m=text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);if(!m)return text;const a=+m[1],b=+m[2];year=+m[3];if(a>12&&b<=12){day=a;month=b;}else if(b>12&&a<=12){month=a;day=b;}else{month=a;day=b;}}
+  const d=new Date(Date.UTC(year,month-1,day));if(month<1||month>12||day<1||day>31||d.getUTCFullYear()!==year||d.getUTCMonth()!==month-1||d.getUTCDate()!==day)return text;
+  return `${String(month).padStart(2,"0")}/${String(day).padStart(2,"0")}/${year}`;
+}
+
 
 import { getDispenseLots, submitDispense } from "./modules/dispense.js";
 
@@ -625,11 +633,11 @@ const index = $("lotSelect").value;
 
 selectedLot = index === "" ? null : lots[Number(index)];
 
-$("exp").value = selectedLot?.exp || "";
+$("exp").value = formatDateMDY(selectedLot?.exp) || "";
 
 $("lotInfo").textContent = selectedLot
 
-? `Lot: ${selectedLot.lot} | EXP: ${selectedLot.exp || "ไม่ระบุ"} | คงเหลือ: ${selectedLot.balance}`
+? `Lot: ${selectedLot.lot} | EXP: ${formatDateMDY(selectedLot.exp) || "ไม่ระบุ"} | คงเหลือ: ${selectedLot.balance}`
 
 : "เลือก Lot เพื่อให้ระบบเติม EXP";
 
@@ -693,7 +701,7 @@ icon: "question",
 
 title: "ยืนยันการจ่าย?",
 
-html: `${esc(item.patient_name)}<br>${esc(item.medicine_name)}<br>จำนวน <b>${esc(item.dose_count)}</b> โดส<br>Lot: <b>${esc(selectedLot.lot)}</b><br>EXP: <b>${esc(selectedLot.exp || "ไม่ระบุ")}</b>`,
+html: `${esc(item.patient_name)}<br>${esc(item.medicine_name)}<br>จำนวน <b>${esc(item.dose_count)}</b> โดส<br>Lot: <b>${esc(selectedLot.lot)}</b><br>EXP: <b>${esc(formatDateMDY(selectedLot.exp) || "ไม่ระบุ")}</b>`,
 
 showCancelButton: true,
 

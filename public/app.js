@@ -125,7 +125,7 @@ async function scan(text) {
         qty: 1,
         user,
         lot: d.lot || "-",
-        exp: d.exp || "-"
+        exp: formatDateMDY(d.exp) || "-"
       });
 
     }
@@ -147,6 +147,25 @@ async function scan(text) {
   }
 }
 
+
+function formatDateMDY(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const text = String(value).trim();
+  let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[T\s].*)?$/);
+  let year, month, day;
+  if (m) { year=+m[1]; month=+m[2]; day=+m[3]; }
+  else {
+    m = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (!m) return text;
+    const a=+m[1], b=+m[2]; year=+m[3];
+    if (a>12 && b<=12) { day=a; month=b; }
+    else if (b>12 && a<=12) { month=a; day=b; }
+    else { month=a; day=b; }
+  }
+  const d = new Date(Date.UTC(year,month-1,day));
+  if (month<1 || month>12 || day<1 || day>31 || d.getUTCFullYear()!==year || d.getUTCMonth()!==month-1 || d.getUTCDate()!==day) return text;
+  return `${String(month).padStart(2,"0")}/${String(day).padStart(2,"0")}/${year}`;
+}
 
 /* =========================
    RENDER LIST
@@ -171,7 +190,7 @@ function renderList() {
       <div>
         <div style="color:#22c55e;font-weight:600">${i.code}</div>
         <div style="font-size:12px;color:#cbd5e1">${i.name}</div>
-        <div style="font-size:12px;color:#64748b">${i.lot} | ${i.exp}</div>
+        <div style="font-size:12px;color:#64748b">${i.lot} | ${formatDateMDY(i.exp)}</div>
       </div>
 
       <div style="display:flex;align-items:center;gap:8px">
