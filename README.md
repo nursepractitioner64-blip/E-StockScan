@@ -171,3 +171,15 @@ SESSION_SECRET=...
 ```
 
 Do not commit `.env` or `service-account.json`.
+
+
+## สมัครสมาชิกผ่าน LINE (ใช้บัญชีร่วมกับ E-ServiceofPharmacy)
+
+- หน้าสมัครต้องเชื่อมต่อ LINE ผ่าน LIFF ก่อนส่งข้อมูลสมัคร
+- ตั้งค่า `LINE_CHANNEL_ID` เป็น LINE Login channel ID ของ Provider ที่ใช้ร่วมกัน
+- ตั้งค่า `LINE_LIFF_ID` เป็น LIFF app ID ที่ endpoint URL ชี้มาที่ deployment ของ E-StockScan
+- LIFF ต้องเปิด scope `openid` และ `profile`
+- ตั้งค่า `GOOGLE_SHEET_ID` ให้ตรงกับ E-ServiceofPharmacy และใช้ชีต `USERS` เดียวกัน
+- การสมัครใหม่จะถูกบันทึกเป็น `STATUS=Pending`, `ROLE=USER`, `BRANCH_IDS` ว่าง จนกว่า Admin จะอนุมัติและกำหนดสิทธิ์
+- API ตรวจสอบ ID Token กับ LINE ฝั่งเซิร์ฟเวอร์ ไม่เชื่อ `LINE_USER_ID` ที่ส่งมาจาก browser
+- รหัสผ่านที่สร้างจากทั้งสองโปรแกรมรองรับการตรวจสอบ hash แบบ `scrypt:` และ `scrypt$` เพื่อให้บัญชีร่วมกันล็อกอินได้

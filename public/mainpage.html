@@ -20,7 +20,8 @@
     .icon{width:58px;height:58px;border-radius:16px;display:grid;place-items:center;font-size:30px;background:#ecfeff}
     .menu-btn h2{margin:0 0 4px;font-size:20px;color:#0f172a}.menu-btn p{margin:0;color:#64748b;font-size:14px}
     .admin{margin-top:14px;display:none}
-    .footer{margin-top:22px;text-align:center}.logout{border:0;background:#fee2e2;color:#991b1b;border-radius:12px;padding:11px 20px;font-weight:700;cursor:pointer}
+    .footer{margin-top:22px;text-align:center;display:grid;gap:10px;justify-items:center}.logout{border:0;background:#fee2e2;color:#991b1b;border-radius:12px;padding:11px 20px;font-weight:700;cursor:pointer}
+    .line-link{border:0;background:#06c755;color:#fff;border-radius:12px;padding:11px 20px;font-weight:700;cursor:pointer;width:min(100%,340px)}.line-link:disabled{opacity:.65;cursor:wait}.line-status{font-size:12px;color:#64748b;max-width:520px;text-align:center}
   </style>
 </head>
 <body>
@@ -61,11 +62,14 @@
     </button>
 
     <div class="footer">
+      <div class="line-status" id="lineLinkStatus">กำลังตรวจสอบสถานะ LINE...</div>
+      <button class="line-link" id="linkLineBtn" type="button">💬 ผูกบัญชี LINE กับบัญชีเดิม</button>
       <button class="logout" id="logoutBtn" type="button">ออกจากระบบ</button>
     </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
     async function api(url, options={}){
       const res=await fetch(url,{credentials:"include",...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
@@ -74,6 +78,59 @@
       return data;
     }
 
+    let lineLiffPromise = null;
+    async function initLineLiff(){
+      if(lineLiffPromise) return lineLiffPromise;
+      lineLiffPromise=(async()=>{
+        if(!window.liff) throw new Error("โหลด LINE LIFF SDK ไม่สำเร็จ");
+        const cfg=await api("/api/config",{cache:"no-store"});
+        const liffId=String(cfg.liff_id||"").trim();
+        if(!liffId) throw new Error("ยังไม่ได้ตั้งค่า LINE_LIFF_ID บน Server");
+        await window.liff.init({liffId});
+      })().catch(err=>{lineLiffPromise=null;throw err;});
+      return lineLiffPromise;
+    }
+    function cleanLinkQuery(){
+      const url=new URL(location.href); url.searchParams.delete("linkLine");
+      history.replaceState({},document.title,url.pathname+url.search+url.hash);
+    }
+    async function refreshLineStatus(){
+      const status=document.getElementById("lineLinkStatus");
+      const button=document.getElementById("linkLineBtn");
+      try{
+        const data=await api("/api/auth/line/status",{cache:"no-store"});
+        if(data.linked){status.textContent=`เชื่อมต่อ LINE แล้ว${data.display_name?": "+data.display_name:""}`;button.textContent="✓ เชื่อมต่อ LINE แล้ว";button.disabled=true;}
+        else {status.textContent="บัญชีนี้ยังไม่ได้ผูก LINE";button.textContent="💬 ผูกบัญชี LINE กับบัญชีเดิม";button.disabled=false;}
+      }catch(err){status.textContent=err.message||"ตรวจสอบสถานะ LINE ไม่สำเร็จ";button.disabled=false;}
+    }
+    async function performLineLink(){
+      const button=document.getElementById("linkLineBtn");
+      const status=document.getElementById("lineLinkStatus");
+      button.disabled=true; status.textContent="กำลังตรวจสอบบัญชี LINE...";
+      try{
+        await initLineLiff();
+        if(!window.liff.isLoggedIn()){
+          const redirect=new URL(location.href); redirect.searchParams.set("linkLine","1");
+          window.liff.login({redirectUri:redirect.toString()}); return;
+        }
+        const token=window.liff.getIDToken();
+        if(!token) throw new Error("ไม่พบ LINE ID Token กรุณาตรวจสอบ LIFF scope openid");
+        const verified=await api("/api/auth/line/verify",{method:"POST",body:JSON.stringify({id_token:token})});
+        const line=verified.line||{};
+        const confirmText=`ต้องการผูกบัญชี LINE${line.display_name?" "+line.display_name:" นี้"} เข้ากับบัญชี ${document.getElementById("userName").textContent} ใช่หรือไม่?`;
+        if(!window.confirm(confirmText)){cleanLinkQuery();await refreshLineStatus();return;}
+        const result=await api("/api/auth/line/link",{method:"POST",body:JSON.stringify({id_token:token})});
+        status.textContent=`เชื่อมต่อ LINE แล้ว${result.display_name?": "+result.display_name:""}`;
+        button.textContent="✓ เชื่อมต่อ LINE แล้ว";button.disabled=true;
+        cleanLinkQuery();
+        if(window.Swal) await Swal.fire({icon:"success",title:"ผูกบัญชีสำเร็จ",text:result.message||"เชื่อมต่อ LINE กับบัญชีเดิมแล้ว"});
+        else alert(result.message||"ผูกบัญชี LINE สำเร็จ");
+      }catch(err){
+        cleanLinkQuery(); status.textContent=err.message||"ผูกบัญชี LINE ไม่สำเร็จ";
+        if(window.Swal) await Swal.fire({icon:"error",title:"ผูกบัญชี LINE ไม่สำเร็จ",text:err.message||"กรุณาลองใหม่"}); else alert(err.message||"ผูกบัญชี LINE ไม่สำเร็จ");
+        await refreshLineStatus();
+      }finally{button.disabled=button.textContent.includes("เชื่อมต่อ LINE แล้ว");}
+    }
     async function init(){
       try{
         const data=await api("/api/auth/me");
@@ -83,9 +140,12 @@
         const pic=u.LINE_PICTURE_URL||u.line_picture_url||"";
         if(pic) document.getElementById("avatar").src=pic;
         if(String(u.ROLE||u.role||"USER").toUpperCase()==="ADMIN") document.getElementById("adminBtn").style.display="flex";
+        await refreshLineStatus();
+        if(new URLSearchParams(location.search).get("linkLine")==="1") await performLineLink();
       }catch(e){ location.href="/index.html"; return; }
     }
 
+    document.getElementById("linkLineBtn").onclick=performLineLink;
     document.getElementById("sessionBtn").onclick=()=>location.href="/session.html";
     document.getElementById("dispenseBtn").onclick=()=>location.href="/dispense.html";
     document.getElementById("adminBtn").onclick=()=>location.href="/admin-users.html";

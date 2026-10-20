@@ -34,7 +34,8 @@ const USERS_HEADERS = [
   "LINE_PICTURE_URL",
   "STATUS",
   "ROLE",
-  "CREATED_AT"
+  "CREATED_AT",
+  "BRANCH_IDS"
 ];
 
 const MOVEMENT_SCHEMA = [
@@ -317,23 +318,22 @@ function hashPassword(password) {
 
 function verifyPassword(password, stored) {
   return new Promise(resolve => {
-    const parts = String(stored || "").split(":");
+    const value = String(stored || "");
+    let parts;
+    if (value.startsWith("scrypt:")) parts = value.split(":");
+    else if (value.startsWith("scrypt$")) parts = value.split("$");
+    else return resolve(false);
 
-    if (parts.length !== 3 || parts[0] !== "scrypt") {
+    if (parts.length !== 3 || parts[0] !== "scrypt" || !parts[1] || !/^[a-f0-9]+$/i.test(parts[2] || "")) {
       return resolve(false);
     }
 
     const salt = parts[1];
     const expected = Buffer.from(parts[2], "hex");
 
-    crypto.scrypt(password, salt, expected.length, (err, derived) => {
-      if (err || derived.length !== expected.length) {
-        return resolve(false);
-      }
-
-      resolve(
-        crypto.timingSafeEqual(derived, expected)
-      );
+    crypto.scrypt(String(password), salt, expected.length, (err, derived) => {
+      if (err || !derived || derived.length !== expected.length) return resolve(false);
+      resolve(crypto.timingSafeEqual(derived, expected));
     });
   });
 }
@@ -540,7 +540,7 @@ function rowToUser(row) {
 async function getUsers() {
   await ensureSheet("USERS", USERS_HEADERS);
 
-  const rows = await getValues("USERS!A:O");
+  const rows = await getValues("USERS!A:P");
 
   if (!rows.length) return [];
 
@@ -552,7 +552,7 @@ async function appendUser(user) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: SHEET_ID,
-    range: "USERS!A:O",
+    range: "USERS!A:P",
     valueInputOption: "RAW",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
@@ -562,7 +562,7 @@ async function appendUser(user) {
 }
 
 async function findUserRowById(userId) {
-  const rows = await getValues("USERS!A:O");
+  const rows = await getValues("USERS!A:P");
   const target = String(userId || "").trim();
 
   for (let index = 1; index < rows.length; index += 1) {
@@ -643,64 +643,123 @@ function safeUser(user) {
    LINE LIFF / ID TOKEN
 ========================================= */
 
+async function verifyLineIdToken(idToken) {
+  const token = String(idToken || "").trim();
+  if (!token) {
+    const error = new Error("กรุณาเชื่อมต่อบัญชี LINE ก่อนสมัคร");
+    error.status = 400;
+    throw error;
+  }
+
+  const channelId = String(process.env.LINE_CHANNEL_ID || "").trim();
+  if (!channelId) {
+    const error = new Error("ยังไม่ได้ตั้งค่า LINE_CHANNEL_ID บน Server");
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch("https://api.line.me/oauth2/v2.1/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ id_token: token, client_id: channelId })
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.sub) {
+    const error = new Error("LINE Token ไม่ถูกต้องหรือหมดอายุ กรุณาเชื่อมต่อ LINE ใหม่");
+    error.status = 401;
+    throw error;
+  }
+
+  return {
+    user_id: String(data.sub),
+    display_name: String(data.name || ""),
+    picture_url: String(data.picture || "")
+  };
+}
+
 app.post("/api/auth/line/verify", async (req, res) => {
   try {
-    const idToken = String(req.body.id_token || "");
+    const line = await verifyLineIdToken(req.body?.id_token);
+    return res.json({ success: true, line });
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
+    console.error("LINE VERIFY ERROR:", err);
+    return res.status(500).json({ success: false, message: "ตรวจสอบ LINE ไม่สำเร็จ" });
+  }
+});
 
-    if (!idToken) {
-      return res.status(400).json({
-        success: false,
-        message: "ไม่พบ LINE ID Token"
-      });
+/* =========================================
+   LINK LINE TO AN EXISTING ACCOUNT
+   Requires an active, authenticated account.
+========================================= */
+app.get("/api/auth/line/status", requireAuth, async (req, res) => {
+  try {
+    const users = await getUsers();
+    const current = users.find(u => String(u.USER_ID) === String(req.user.user_id));
+    if (!current || String(current.STATUS || "").toLowerCase() !== "active") {
+      return res.status(403).json({ success: false, message: "บัญชีนี้ยังไม่สามารถใช้งานได้" });
+    }
+    return res.json({
+      success: true,
+      linked: Boolean(String(current.LINE_USER_ID || "").trim()),
+      display_name: String(current.LINE_DISPLAY_NAME || "")
+    });
+  } catch (err) {
+    console.error("LINE LINK STATUS ERROR:", err);
+    return res.status(500).json({ success: false, message: "ตรวจสอบสถานะ LINE ไม่สำเร็จ" });
+  }
+});
+
+app.post("/api/auth/line/link", requireAuth, async (req, res) => {
+  try {
+    const line = await verifyLineIdToken(req.body?.id_token);
+    const users = await getUsers();
+    const current = users.find(u => String(u.USER_ID) === String(req.user.user_id));
+    if (!current || String(current.STATUS || "").toLowerCase() !== "active") {
+      return res.status(403).json({ success: false, message: "บัญชีนี้ยังไม่สามารถใช้งานได้" });
     }
 
-    const channelId = String(process.env.LINE_CHANNEL_ID || "");
-
-    if (!channelId) {
-      return res.status(500).json({
-        success: false,
-        message: "ยังไม่ได้ตั้งค่า LINE_CHANNEL_ID"
-      });
+    const existingLineId = String(current.LINE_USER_ID || "").trim();
+    if (existingLineId && existingLineId !== line.user_id) {
+      return res.status(409).json({ success: false, message: "บัญชีนี้ผูกกับ LINE อื่นอยู่แล้ว กรุณาติดต่อ Admin หากต้องการเปลี่ยนบัญชี LINE" });
     }
 
-    const response = await fetch(
-      "https://api.line.me/oauth2/v2.1/verify",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: new URLSearchParams({
-          id_token: idToken,
-          client_id: channelId
-        })
-      }
+    const duplicate = users.find(u =>
+      String(u.USER_ID) !== String(current.USER_ID) &&
+      String(u.LINE_USER_ID || "").trim() === line.user_id
     );
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: "บัญชี LINE นี้ผูกกับผู้ใช้งานอื่นแล้ว ไม่สามารถผูกซ้ำได้" });
+    }
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(401).json({
-        success: false,
-        message: "LINE Token ไม่ถูกต้อง"
+    if (!existingLineId) {
+      const updated = await updateUserRow(current.USER_ID, {
+        LINE_USER_ID: line.user_id,
+        LINE_DISPLAY_NAME: line.display_name,
+        LINE_PICTURE_URL: line.picture_url
+      });
+      if (!updated) return res.status(404).json({ success: false, message: "ไม่พบบัญชีผู้ใช้งานเดิม" });
+    } else {
+      // Same LINE identity: refresh profile fields without changing the account.
+      await updateUserRow(current.USER_ID, {
+        LINE_DISPLAY_NAME: line.display_name,
+        LINE_PICTURE_URL: line.picture_url
       });
     }
 
     return res.json({
       success: true,
-      line: {
-        user_id: data.sub || "",
-        display_name: data.name || "",
-        picture_url: data.picture || ""
-      }
+      linked: true,
+      message: existingLineId ? "บัญชีนี้เชื่อมต่อ LINE อยู่แล้ว" : "ผูกบัญชี LINE กับบัญชีเดิมสำเร็จ",
+      display_name: line.display_name
     });
   } catch (err) {
-    console.error("LINE VERIFY ERROR:", err);
-
-    res.status(500).json({
-      success: false,
-      message: "ตรวจสอบ LINE ไม่สำเร็จ"
-    });
+    if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+    console.error("LINE LINK ERROR:", err);
+    return res.status(500).json({ success: false, message: "ผูกบัญชี LINE ไม่สำเร็จ กรุณาลองใหม่" });
   }
 });
 
@@ -711,6 +770,8 @@ app.post("/api/auth/line/verify", async (req, res) => {
 app.post("/api/auth/register", async (req, res) => {
   try {
     const body = req.body || {};
+    // LINE identity is always derived from a server-verified ID token; never trust browser-supplied LINE IDs.
+    const verifiedLine = await verifyLineIdToken(body.id_token);
 
     const fullNameTh = String(body.full_name_th || body.fullNameTh || body.full_name || "").trim();
     const fullNameEn = String(body.full_name_en || body.fullNameEn || "").trim();
@@ -721,9 +782,9 @@ app.post("/api/auth/register", async (req, res) => {
     const confirmPassword = String(body.confirm_password || body.confirmPassword || "");
     const safePhone = String(body.phone || "").trim();
     const safeEmail = String(body.email || "").trim();
-    const lineUserId = String(body.line_user_id || "").trim();
-    const lineDisplayName = String(body.line_display_name || "").trim();
-    const linePictureUrl = String(body.line_picture_url || "").trim();
+    const lineUserId = verifiedLine.user_id;
+    const lineDisplayName = verifiedLine.display_name;
+    const linePictureUrl = verifiedLine.picture_url;
 
     if (
       !fullNameTh ||
@@ -814,7 +875,8 @@ app.post("/api/auth/register", async (req, res) => {
       LINE_PICTURE_URL: linePictureUrl,
       STATUS: "Pending",
       ROLE: "USER",
-      CREATED_AT: new Date().toISOString()
+      CREATED_AT: new Date().toISOString(),
+      BRANCH_IDS: ""
     };
 
     await appendUser(user);
@@ -825,11 +887,14 @@ app.post("/api/auth/register", async (req, res) => {
       user: safeUser(user)
     });
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
     console.error("REGISTER ERROR:", err);
 
     res.status(500).json({
       success: false,
-      message: err.message || "Registration failed"
+      message: "สมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่"
     });
   }
 });
@@ -1586,24 +1651,103 @@ app.get("/api/users", requireAuth, async (req, res) => {
 });
 
 /* =========================================
+   BRANCH ACCESS / COUNT SESSION SCHEMA
+========================================= */
+const COUNT_SESSION_HEADERS = [
+  "SESSION_ID", "MOVEMENT_ID", "CODE", "NAME",
+  "QTY", "USER", "TIME", "BRANCH_ID"
+];
+
+function parseBranchIds(value) {
+  return [...new Set(String(value || "")
+    .split(/[,;|\n]+/)
+    .map(v => v.trim())
+    .filter(Boolean))];
+}
+
+async function getCurrentUserRecord(req) {
+  const users = await getUsers();
+  return users.find(u => String(u.USER_ID) === String(req.user.user_id)) || null;
+}
+
+async function getAuthorizedBranch(req, requestedBranchId = "") {
+  const record = await getCurrentUserRecord(req);
+  if (!record || String(record.STATUS || "").toLowerCase() !== "active") {
+    const err = new Error("ไม่พบผู้ใช้งานหรือบัญชีไม่ได้รับอนุมัติ");
+    err.status = 403;
+    throw err;
+  }
+
+  const allowed = parseBranchIds(record.BRANCH_IDS);
+  if (!allowed.length) {
+    const err = new Error("บัญชีนี้ยังไม่ได้กำหนด BRANCH_IDS กรุณาติดต่อผู้ดูแลระบบ");
+    err.status = 403;
+    throw err;
+  }
+
+  const requested = String(requestedBranchId || "").trim();
+  if (requested) {
+    if (!allowed.includes(requested)) {
+      const err = new Error("คุณไม่มีสิทธิ์ใช้งานสาขาที่เลือก");
+      err.status = 403;
+      throw err;
+    }
+    return requested;
+  }
+
+  if (allowed.length === 1) return allowed[0];
+  const err = new Error("กรุณาเลือกสาขาก่อนเริ่มตรวจนับ");
+  err.status = 400;
+  err.branchIds = allowed;
+  throw err;
+}
+
+async function ensureCountSessionSheet() {
+  await ensureSheet("COUNT_SESSION", COUNT_SESSION_HEADERS);
+  const sheets = await sheetsApi();
+  // Keep the agreed 8-column schema. Existing historical rows remain intact;
+  // old rows have a blank BRANCH_ID and are intentionally not assigned to a guessed branch.
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: "COUNT_SESSION!A1:H1",
+    valueInputOption: "RAW",
+    requestBody: { values: [COUNT_SESSION_HEADERS] }
+  });
+}
+
+/* =========================================
    SESSION CREATE
 ========================================= */
 
-app.get("/api/session/new", requireAuth, (req, res) => {
-  res.json({
-    success: true,
-    session_id: `S${Date.now()}`,
-    user: {
-      user_id: req.user.user_id,
-      full_name: req.user.full_name,
-      full_name_th: req.user.full_name_th || "",
-      full_name_en: req.user.full_name_en || "",
-      position: req.user.position,
-      employment_type: req.user.employment_type || "",
-      role: req.user.role || "USER",
-      username: req.user.username
+app.get("/api/session/new", requireAuth, async (req, res) => {
+  try {
+    const record = await getCurrentUserRecord(req);
+    if (!record || String(record.STATUS || "").toLowerCase() !== "active") {
+      return res.status(403).json({ success: false, message: "บัญชีผู้ใช้ยังไม่ได้รับอนุมัติ" });
     }
-  });
+    const branch_ids = parseBranchIds(record.BRANCH_IDS);
+    if (!branch_ids.length) {
+      return res.status(403).json({ success: false, message: "บัญชีนี้ยังไม่ได้กำหนด BRANCH_IDS" });
+    }
+    res.json({
+      success: true,
+      session_id: `S${Date.now()}`,
+      branch_ids,
+      user: {
+        user_id: req.user.user_id,
+        full_name: req.user.full_name,
+        full_name_th: req.user.full_name_th || "",
+        full_name_en: req.user.full_name_en || "",
+        position: req.user.position,
+        employment_type: req.user.employment_type || "",
+        role: req.user.role || "USER",
+        username: req.user.username
+      }
+    });
+  } catch (err) {
+    console.error("SESSION CREATE ERROR:", err);
+    res.status(500).json({ success: false, message: "สร้าง Session ไม่สำเร็จ" });
+  }
 });
 
 /* =========================================
@@ -1688,37 +1832,40 @@ app.get("/api/movement/:id", requireAuth, async (req, res) => {
 
 app.post("/api/count", requireAuth, async (req, res) => {
   try {
-    await ensureSheet("COUNT_SESSION", [
-      "SESSION_ID", "MOVEMENT_ID", "CODE", "NAME",
-      "QTY", "USER", "TIME"
-    ]);
-
     const items = Array.isArray(req.body) ? req.body : [];
-    const sheets = await sheetsApi();
+    if (!items.length) return res.status(400).json({ success: false, message: "ไม่มีรายการตรวจนับ" });
 
+    const requestedBranches = [...new Set(items.map(i => String(i.branch_id || "").trim()).filter(Boolean))];
+    if (requestedBranches.length > 1) {
+      return res.status(400).json({ success: false, message: "รายการเดียวกันต้องอยู่ในสาขาเดียวกัน" });
+    }
+    const branchId = await getAuthorizedBranch(req, requestedBranches[0] || "");
+    await ensureCountSessionSheet();
+    const sheets = await sheetsApi();
+    const now = new Date().toISOString();
     const rows = items.map(i => ([
-      i.session_id,
-      i.movement_id,
-      i.code,
-      i.name,
-      i.qty,
+      String(i.session_id || ""),
+      String(i.movement_id || ""),
+      String(i.code || ""),
+      String(i.name || ""),
+      Number(i.qty || 0),
       req.user.full_name,
-      new Date().toISOString()
+      now,
+      branchId
     ]));
 
-    if (rows.length) {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SHEET_ID,
-        range: "COUNT_SESSION!A:G",
-        valueInputOption: "RAW",
-        requestBody: { values: rows }
-      });
-    }
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: "COUNT_SESSION!A:H",
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: rows }
+    });
 
-    res.json({ success: true });
+    res.json({ success: true, branch_id: branchId, saved: rows.length });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "save failed" });
+    console.error("SAVE COUNT SESSION ERROR:", err);
+    res.status(err.status || 500).json({ success: false, message: err.message || "บันทึกข้อมูลไม่สำเร็จ", branch_ids: err.branchIds || undefined });
   }
 });
 
@@ -1728,27 +1875,20 @@ app.post("/api/count", requireAuth, async (req, res) => {
 
 app.get("/api/session/:sid", requireAuth, async (req, res) => {
   try {
-    const rows = await getValues("COUNT_SESSION!A:G");
-
-    res.json(
-      rows
-        .filter(r =>
-          r[0] === req.params.sid &&
-          r[5] === req.user.full_name
-        )
-        .map(r => ({
-          session_id: r[0],
-          movement_id: r[1],
-          code: r[2],
-          name: r[3],
-          qty: Number(r[4]),
-          user: r[5],
-          time: r[6]
-        }))
-    );
+    const branchId = await getAuthorizedBranch(req, req.query.branch_id || "");
+    await ensureCountSessionSheet();
+    const rows = await getValues("COUNT_SESSION!A:H");
+    res.json(rows.slice(1)
+      .filter(r => String(r[0] || "") === req.params.sid &&
+        String(r[5] || "") === String(req.user.full_name || "") &&
+        String(r[7] || "") === branchId)
+      .map(r => ({
+        session_id: r[0], movement_id: r[1], code: r[2], name: r[3],
+        qty: Number(r[4] || 0), user: r[5], time: r[6], branch_id: r[7]
+      })));
   } catch (err) {
-    console.error(err);
-    res.status(500).json([]);
+    console.error("GET SESSION ERROR:", err);
+    res.status(err.status || 500).json({ success: false, message: err.message || "อ่านข้อมูล Session ไม่สำเร็จ", branch_ids: err.branchIds || undefined });
   }
 });
 
@@ -1758,56 +1898,52 @@ app.get("/api/session/:sid", requireAuth, async (req, res) => {
 
 app.post("/api/close", requireAuth, async (req, res) => {
   try {
-    const session_id = req.body.session_id;
+    const session_id = String(req.body.session_id || "");
+    const branchId = await getAuthorizedBranch(req, req.body.branch_id || "");
+    if (!session_id) return res.status(400).json({ success: false, message: "ไม่พบ SESSION_ID" });
 
     const master = await getValues("INVENTORY_MASTER!A:D");
-    const session = await getValues("COUNT_SESSION!A:G");
+    await ensureCountSessionSheet();
+    const session = await getValues("COUNT_SESSION!A:H");
 
-    await ensureSheet("SESSION_RESULT", [
-      "SESSION", "CODE", "REQUIRED", "ACTUAL", "DIFF"
-    ]);
+    const resultHeaders = ["SESSION", "CODE", "REQUIRED", "ACTUAL", "DIFF", "BRANCH_ID"];
+    await ensureSheet("SESSION_RESULT", resultHeaders);
+    const sheets = await sheetsApi();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: "SESSION_RESULT!A1:F1",
+      valueInputOption: "RAW",
+      requestBody: { values: [resultHeaders] }
+    });
 
     const result = [];
-
     master.slice(1).forEach(r => {
-      const code = r[0];
-      const required = Number(r[3]);
-
-      const actual = session
-        .filter(x =>
-          x[0] === session_id &&
-          x[2] === code &&
-          x[5] === req.user.full_name
-        )
-        .reduce((sum, x) => sum + Number(x[4]), 0);
-
-      result.push([
-        session_id,
-        code,
-        required,
-        actual,
-        actual - required
-      ]);
+      const code = String(r[0] || "");
+      const required = Number(r[3] || 0);
+      const actual = session.slice(1)
+        .filter(x => String(x[0] || "") === session_id &&
+          String(x[2] || "") === code &&
+          String(x[5] || "") === String(req.user.full_name || "") &&
+          String(x[7] || "") === branchId)
+        .reduce((sum, x) => sum + Number(x[4] || 0), 0);
+      result.push([session_id, code, required, actual, actual - required, branchId]);
     });
 
     if (result.length) {
-      const sheets = await sheetsApi();
-
       await sheets.spreadsheets.values.append({
         spreadsheetId: SHEET_ID,
-        range: "SESSION_RESULT!A:E",
+        range: "SESSION_RESULT!A:F",
         valueInputOption: "RAW",
+        insertDataOption: "INSERT_ROWS",
         requestBody: { values: result }
       });
     }
-
-    res.json({ success: true, result });
+    res.json({ success: true, branch_id: branchId, result });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "close failed" });
+    console.error("CLOSE SESSION ERROR:", err);
+    res.status(err.status || 500).json({ success: false, message: err.message || "ปิด Session ไม่สำเร็จ", branch_ids: err.branchIds || undefined });
   }
 });
-
 
 /* =========================================
    DISPENSE / RX STICKER OUT

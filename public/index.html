@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Emergency Check List - Login</title>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <link rel="stylesheet" href="/style.css">
   <style>
     .auth-page{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:#0f172a;color:#fff;font-family:Prompt,system-ui,sans-serif}
@@ -64,8 +65,8 @@
       </div>
       <div>
         <label for="username">Username</label>
-        <input id="username" autocomplete="username" readonly required>
-        <div class="username-note">ระบบสร้างอัตโนมัติจากชื่อภาษาอังกฤษ + ตัวอักษรแรกของนามสกุล เช่น Thanachanan Kenkong → thanachanan.k</div>
+        <input id="username" autocomplete="username" required minlength="3" maxlength="50" pattern="[A-Za-z0-9._-]+">
+        <div class="username-note">ระบบสร้างอัตโนมัติจากชื่อภาษาอังกฤษ เช่น Thanachanan Kenkong → thanachanan.k สามารถแก้ไขได้หากชื่อซ้ำ</div>
       </div>
 
       <div class="grid-2">
@@ -93,9 +94,9 @@
       <div><label for="confirmPassword">Confirm Password</label><input id="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></div>
 
       <div class="password-note">Password ต้องมีอย่างน้อย 8 ตัวอักษร</div>
-      <div class="auth-note">💬 LINE<br>การเชื่อมต่อ LINE จะเปิดใช้งานในขั้นตอนถัดไป<br>LINE User ID / Display Name / Picture URL จะถูกเก็บไว้รองรับการใช้งานในอนาคต</div>
-
-      <button id="registerBtn" class="auth-btn btn-login" type="submit">📝 Register</button>
+      <div class="auth-note" id="lineRegisterStatus">💬 กรุณาเชื่อมต่อ LINE ก่อนสมัคร บัญชีจะรอ Admin อนุมัติก่อนเข้าใช้งาน</div>
+      <button id="connectLineBtn" class="auth-btn" style="background:#06c755;color:#fff" type="button">💬 เชื่อมต่อ LINE</button>
+      <button id="registerBtn" class="auth-btn btn-login" type="submit" disabled>📝 สมัครสมาชิกผ่าน LINE</button>
     </form>
   </div>
 
@@ -228,6 +229,99 @@ async function api(
 
 
 /* =====================================================
+   LINE LIFF REGISTRATION
+===================================================== */
+let registrationLineToken = "";
+let registrationLineProfile = null;
+let registrationLiffId = "";
+let registrationLiffPromise = null;
+
+async function loadRegistrationLiffConfig() {
+  try {
+    const cfg = await api("/api/config", { cache: "no-store" });
+    registrationLiffId = String(cfg.liff_id || "").trim();
+  } catch (_) {
+    registrationLiffId = "";
+  }
+}
+
+async function ensureRegistrationLiff() {
+  if (registrationLiffPromise) return registrationLiffPromise;
+  registrationLiffPromise = (async () => {
+    if (!window.liff) throw new Error("โหลด LINE LIFF SDK ไม่สำเร็จ กรุณารีเฟรชหน้า");
+    if (!registrationLiffId) await loadRegistrationLiffConfig();
+    if (!registrationLiffId) throw new Error("ยังไม่ได้ตั้งค่า LINE_LIFF_ID บน Server");
+    await window.liff.init({ liffId: registrationLiffId });
+  })().catch(err => {
+    registrationLiffPromise = null;
+    throw err;
+  });
+  return registrationLiffPromise;
+}
+
+function renderRegistrationLineStatus(message, connected = false) {
+  const status = $("lineRegisterStatus");
+  const submit = $("registerBtn");
+  if (status) status.textContent = message;
+  if (submit) submit.disabled = !connected;
+}
+
+async function verifyRegistrationLine() {
+  await ensureRegistrationLiff();
+  if (!window.liff.isLoggedIn()) {
+    const redirect = new URL(window.location.href);
+    redirect.searchParams.set("register", "1");
+    window.liff.login({ redirectUri: redirect.toString() });
+    return false;
+  }
+
+  const idToken = window.liff.getIDToken();
+  if (!idToken) throw new Error("ไม่พบ LINE ID Token กรุณาอนุญาต openid ใน LIFF แล้วเชื่อมต่อใหม่");
+
+  const verified = await api("/api/auth/line/verify", {
+    method: "POST",
+    body: JSON.stringify({ id_token: idToken })
+  });
+  if (!verified?.line?.user_id) throw new Error("ไม่สามารถยืนยันบัญชี LINE ได้");
+
+  registrationLineToken = idToken;
+  registrationLineProfile = verified.line;
+  renderRegistrationLineStatus(`เชื่อมต่อ LINE แล้ว: ${verified.line.display_name || "บัญชี LINE"} — พร้อมสมัครสมาชิก`, true);
+  $("connectLineBtn").textContent = "✓ เชื่อมต่อ LINE แล้ว";
+  return true;
+}
+
+$("connectLineBtn")?.addEventListener("click", async () => {
+  const button = $("connectLineBtn");
+  button.disabled = true;
+  renderRegistrationLineStatus("กำลังเชื่อมต่อ LINE...", false);
+  try {
+    await verifyRegistrationLine();
+  } catch (err) {
+    renderRegistrationLineStatus(err.message || "เชื่อมต่อ LINE ไม่สำเร็จ", false);
+    Swal.fire({ icon: "error", title: "เชื่อมต่อ LINE ไม่สำเร็จ", text: err.message || "กรุณาลองใหม่" });
+  } finally {
+    button.disabled = false;
+  }
+});
+
+(async function restoreLineRegistrationAfterRedirect() {
+  await loadRegistrationLiffConfig();
+  const wantsRegistration = new URLSearchParams(window.location.search).get("register") === "1";
+  if (!wantsRegistration) return;
+  showTab("register");
+  try {
+    await verifyRegistrationLine();
+    const url = new URL(window.location.href);
+    url.searchParams.delete("register");
+    window.history.replaceState({}, document.title, url.toString());
+  } catch (err) {
+    renderRegistrationLineStatus(err.message || "กรุณาเชื่อมต่อ LINE เพื่อสมัครสมาชิก", false);
+  }
+})();
+
+
+/* =====================================================
    USERNAME GENERATOR
 ===================================================== */
 
@@ -326,6 +420,14 @@ $("registerForm").onsubmit =
     const password =
       $("password").value;
 
+    if (!registrationLineToken) {
+      return Swal.fire({
+        icon: "warning",
+        title: "กรุณาเชื่อมต่อ LINE",
+        text: "ต้องยืนยันบัญชี LINE ก่อนจึงจะสมัครสมาชิกได้"
+      });
+    }
+
     const confirmPassword =
       $("confirmPassword").value;
 
@@ -415,6 +517,9 @@ $("registerForm").onsubmit =
             body:
               JSON.stringify({
 
+                id_token:
+                  registrationLineToken,
+
                 full_name_th:
                   $("fullNameTh")
                     .value
@@ -452,14 +557,7 @@ $("registerForm").onsubmit =
                     .value
                     .trim(),
 
-                line_user_id:
-                  null,
-
-                line_display_name:
-                  null,
-
-                line_picture_url:
-                  null
+                // LINE identity is verified and filled by the server from id_token.
 
               })
 
@@ -492,6 +590,10 @@ $("registerForm").onsubmit =
 
 
       $("registerForm").reset();
+      registrationLineToken = "";
+      registrationLineProfile = null;
+      $("connectLineBtn").textContent = "💬 เชื่อมต่อ LINE";
+      renderRegistrationLineStatus("สมัครสำเร็จแล้ว หากต้องการสมัครบัญชีใหม่ให้เชื่อมต่อ LINE อีกครั้ง", false);
 
 
       $("username").value =
@@ -525,10 +627,10 @@ $("registerForm").onsubmit =
     }finally{
 
       $("registerBtn").disabled =
-        false;
+        !registrationLineToken;
 
       $("registerBtn").textContent =
-        "📝 Register";
+        "📝 สมัครสมาชิกผ่าน LINE";
 
     }
 

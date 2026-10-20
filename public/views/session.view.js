@@ -13,6 +13,7 @@ const params = new URLSearchParams(location.search);
 
 let session_id = "";
 let user = "";
+let branch_id = "";
 
 let currentItem = null;
 let items = [];
@@ -34,6 +35,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     currentItem = {
       session_id,
       user,
+      branch_id,
       ...item
     };
 
@@ -65,8 +67,34 @@ async function createSession() {
 
     const d = await r.json();
 
+    if (!d.success) throw new Error(d.message || "Create Session Failed");
+
     session_id = d.session_id;
     user = d.user?.full_name || "-";
+
+    const branchIds = Array.isArray(d.branch_ids) ? d.branch_ids : [];
+    if (branchIds.length === 1) {
+      branch_id = branchIds[0];
+    } else if (branchIds.length > 1) {
+      const options = Object.fromEntries(branchIds.map(id => [id, id]));
+      const selected = await Swal.fire({
+        title: "เลือกสาขาที่ตรวจนับ",
+        input: "select",
+        inputOptions: options,
+        inputPlaceholder: "เลือกสาขา",
+        showCancelButton: true,
+        confirmButtonText: "ยืนยัน",
+        cancelButtonText: "ยกเลิก",
+        allowOutsideClick: false,
+        inputValidator: value => value ? undefined : "กรุณาเลือกสาขา"
+      });
+      if (!selected.isConfirmed || !selected.value) {
+        throw new Error("กรุณาเลือกสาขาก่อนเริ่มตรวจนับ");
+      }
+      branch_id = selected.value;
+    } else {
+      throw new Error(d.message || "บัญชีนี้ยังไม่ได้กำหนดสาขา");
+    }
 
   } catch (err) {
 
@@ -314,8 +342,9 @@ async function closeSession() {
       didOpen: () => Swal.showLoading()
     });
 
-    await saveMovements(items);
-    await closeMovementSession(session_id);
+    const branchItems = items.map(item => ({ ...item, branch_id }));
+    await saveMovements(branchItems);
+    await closeMovementSession(session_id, branch_id);
 
     resetSession();
 

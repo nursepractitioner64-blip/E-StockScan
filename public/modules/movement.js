@@ -39,11 +39,12 @@ export async function saveMovements(items = []) {
       body: JSON.stringify(items)
     });
 
-    if (!res.ok) {
-      throw new Error("บันทึกข้อมูลไม่สำเร็จ");
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.success === false) {
+      throw new Error(result.message || "บันทึกข้อมูลไม่สำเร็จ");
     }
 
-    return await res.json();
+    return result;
 
   } catch (err) {
 
@@ -59,7 +60,7 @@ export async function saveMovements(items = []) {
  * ปิด Session
  * @param {string} sessionId
  */
-export async function closeMovementSession(sessionId) {
+export async function closeMovementSession(sessionId, branchId) {
 
   try {
 
@@ -69,15 +70,17 @@ export async function closeMovementSession(sessionId) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        session_id: sessionId
+        session_id: sessionId,
+        branch_id: branchId
       })
     });
 
-    if (!res.ok) {
-      throw new Error("ปิด Session ไม่สำเร็จ");
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.success === false) {
+      throw new Error(result.message || "ปิด Session ไม่สำเร็จ");
     }
 
-    return await res.json();
+    return result;
 
   } catch (err) {
 
