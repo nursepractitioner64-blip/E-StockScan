@@ -2196,21 +2196,63 @@ async function getAvailableDispenseLots(medicineName) {
   return available;
 }
 
-async function nextDispenseRefNo() {
-  const yearMonth = new Date().toISOString().slice(0, 7).replace("-", "");
-  let rows = [];
-  try {
-    rows = await getValues("INVENTORY_DISPENSE!A:L");
-  } catch (_) {}
+// ใช้เวลาไทยในการกำหนด YYYYMM และปีที่รีเซตลำดับ
+function getBangkokYearMonth(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return { year: values.year, yearMonth: `${values.year}${values.month}` };
+}
 
+function nextSequenceFromRows(rows, { prefix, year, columnIndex }) {
   let max = 0;
-  for (const row of rows.slice(1)) {
-    const ref = String(row[1] || "");
-    const m = ref.match(new RegExp(`^DSP-${yearMonth}-(\\d+)$`));
-    if (m) max = Math.max(max, Number(m[1]));
+  const pattern = new RegExp(`^${prefix}${year}\\d{2}-(\\d{5})$`);
+  for (const row of (rows || []).slice(1)) {
+    const value = String(row?.[columnIndex] || "").trim();
+    const match = value.match(pattern);
+    if (match) max = Math.max(max, Number(match[1]));
   }
+  return max + 1;
+}
 
-  return `DSP-${yearMonth}-${String(max + 1).padStart(5, "0")}`;
+// MOVEMENT_ID ใช้ตัวนับกลางจาก VACCINE_MOVEMENT ทุกโมดูลที่สร้าง movement ต้องเรียกฟังก์ชันนี้
+async function nextMovementId() {
+  const { year, yearMonth } = getBangkokYearMonth();
+  // หากอ่านชีตไม่ได้ให้หยุด ไม่เดาเลข เพราะเสี่ยงออกเลขซ้ำ
+  // อ่านทั้ง movement หลักและ movement วัคซีน เพื่อให้ตัวนับ VMI ใช้ร่วมกันจริง
+  const [inventoryRows, vaccineRows] = await Promise.all([
+    getValues("INVENTORY_MOVEMENT!A:P"),
+    getValues("VACCINE_MOVEMENT!A:P")
+  ]);
+  const inventoryMax = nextSequenceFromRows(inventoryRows, { prefix: "VMI", year, columnIndex: 0 });
+  const vaccineMax = nextSequenceFromRows(vaccineRows, { prefix: "VMI", year, columnIndex: 0 });
+  const sequence = Math.max(inventoryMax, vaccineMax);
+  return `VMI${yearMonth}-${String(sequence).padStart(5, "0")}`;
+}
+
+// REF_NO ของ DISPENSE เป็นตัวนับแยก ตรวจทั้งสองชีตเพื่อไม่ให้เลขเอกสารซ้ำ
+async function nextDispenseRefNo() {
+  const { year, yearMonth } = getBangkokYearMonth();
+  const [movementRows, dispenseRows] = await Promise.all([
+    getValues("VACCINE_MOVEMENT!A:P"),
+    getValues("INVENTORY_DISPENSE!A:L")
+  ]);
+  const movementMax = nextSequenceFromRows(movementRows, { prefix: "RCOUT", year, columnIndex: 2 });
+  const dispenseMax = nextSequenceFromRows(dispenseRows, { prefix: "RCOUT", year, columnIndex: 1 });
+  const sequence = Math.max(movementMax, dispenseMax);
+  return `RCOUT${yearMonth}-${String(sequence).padStart(5, "0")}`;
+}
+
+// Serialize Dispense requests within this Node.js process to reduce duplicate numbers
+// when multiple users save at nearly the same time.
+let dispenseQueue = Promise.resolve();
+function withDispenseSequenceLock(task) {
+  const current = dispenseQueue.then(task, task);
+  dispenseQueue = current.catch(() => undefined);
+  return current;
 }
 
 app.get("/api/dispense/lookup/:id", requireAuth, async (req, res) => {
@@ -2262,6 +2304,7 @@ app.get("/api/dispense/lots", requireAuth, async (req, res) => {
 });
 
 app.post("/api/dispense", requireAuth, async (req, res) => {
+  return withDispenseSequenceLock(async () => {
   try {
     const data = {
       patient_name: cleanText(req.body?.patient_name),
@@ -2333,7 +2376,7 @@ app.post("/api/dispense", requireAuth, async (req, res) => {
 
     // บันทึก movement ออกลง VACCINE_MOVEMENT ตามโครงสร้าง 16 คอลัมน์ที่กำหนด
     await ensureSheet("VACCINE_MOVEMENT", DISPENSE_MOVEMENT_HEADERS);
-    const movementId = `DSPMOV${Date.now()}`;
+    const movementId = await nextMovementId();
     const movementDate = now.slice(0, 10);
     const movementValues = [[
       movementId,                         // MOVEMENT_ID
@@ -2444,6 +2487,7 @@ app.post("/api/dispense", requireAuth, async (req, res) => {
       message: err.message || "บันทึกการจ่ายยาไม่สำเร็จ"
     });
   }
+  });
 });
 
 /* =========================================
