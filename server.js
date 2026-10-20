@@ -15,9 +15,9 @@ app.use(cors({
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-const SHEET_ID =
-  process.env.GOOGLE_SHEET_ID ||
-  "1BYT5Qr65c-t72SWBP4h6vaxj8SxB7Vr8qeU-rQHB0S4";
+// The project is explicitly configured to write to the spreadsheet confirmed by the owner.
+// Do not let a stale GOOGLE_SHEET_ID environment variable silently redirect writes.
+const SHEET_ID = "1BYT5Qr65c-t72SWBP4h6vaxj8SxB7Vr8qeU-rQHB0S4";
 
 const USERS_HEADERS = [
   "USER_ID",
@@ -1854,7 +1854,7 @@ app.post("/api/count", requireAuth, async (req, res) => {
       branchId
     ]));
 
-    await sheets.spreadsheets.values.append({
+    const appendResponse = await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
       range: "COUNT_SESSION!A:H",
       valueInputOption: "RAW",
@@ -1862,7 +1862,37 @@ app.post("/api/count", requireAuth, async (req, res) => {
       requestBody: { values: rows }
     });
 
-    res.json({ success: true, branch_id: branchId, saved: rows.length });
+    // Verify the append response includes a concrete destination range and row count.
+    const updatedRange = appendResponse.data?.updates?.updatedRange || "";
+    const updatedRows = Number(appendResponse.data?.updates?.updatedRows || 0);
+    if (!updatedRange || updatedRows < rows.length) {
+      console.error("COUNT_SESSION APPEND NOT VERIFIED:", {
+        spreadsheetId: SHEET_ID,
+        updatedRange,
+        updatedRows,
+        expectedRows: rows.length
+      });
+      return res.status(502).json({
+        success: false,
+        message: "Google Sheets ไม่ยืนยันการบันทึกข้อมูลครบถ้วน กรุณาตรวจสอบชีต COUNT_SESSION",
+        saved: updatedRows,
+        expected: rows.length
+      });
+    }
+
+    console.log("COUNT_SESSION SAVED:", {
+      spreadsheetId: SHEET_ID,
+      updatedRange,
+      updatedRows,
+      branchId
+    });
+    res.json({
+      success: true,
+      branch_id: branchId,
+      saved: updatedRows,
+      spreadsheet_id: SHEET_ID,
+      updated_range: updatedRange
+    });
   } catch (err) {
     console.error("SAVE COUNT SESSION ERROR:", err);
     res.status(err.status || 500).json({ success: false, message: err.message || "บันทึกข้อมูลไม่สำเร็จ", branch_ids: err.branchIds || undefined });
@@ -1964,6 +1994,11 @@ const DISPENSE_HEADERS = [
   "MEDICINE_NAME", "DOSE_COUNT", "LOT", "EXP", "CODE", "USER", "TIME", "QR_RAW"
 ];
 
+const DISPENSE_MOVEMENT_HEADERS = [
+  "MOVEMENT_ID", "TYPE", "REF_NO", "DATE", "CODE", "NAME", "QTY", "UNIT",
+  "LOT", "EXP", "TARGET", "USER", "TIME", "REMARK", "Location", "QRCODE"
+];
+
 function cleanText(value) {
   return String(value ?? "").trim();
 }
@@ -2061,6 +2096,8 @@ async function getAvailableDispenseLots(medicineName) {
     code: cleanText(getMovement(row, "CODE")),
     lot: cleanText(getMovement(row, "LOT")),
     exp: cleanText(getMovement(row, "EXP")),
+    unit: cleanText(getMovement(row, "UNIT")),
+    refNo: cleanText(getMovement(row, "REF_NO")),
     type: normalizeMovementType(getMovement(row, "TYPE")),
     qty: Number(String(getMovement(row, "QTY")).replace(/,/g, "")) || 0
   })).filter(x => x.name && x.normalizedName && x.lot);
@@ -2108,16 +2145,22 @@ async function getAvailableDispenseLots(medicineName) {
     if (!matchedCodes.has(row.code)) continue;
     const key = `${row.code}||${row.lot}`;
     if (!groups.has(key)) groups.set(key, {
-      code: row.code, lot: row.lot, exp: row.exp, balance: 0, name: row.name
+      code: row.code, lot: row.lot, exp: row.exp, unit: row.unit,
+      balance: 0, name: row.name
     });
     const item = groups.get(key);
     if (row.exp) item.exp = row.exp;
+    if (row.unit) item.unit = row.unit;
     if (row.type === "OUT") item.balance -= row.qty;
     else if (row.type === "IN") item.balance += row.qty;
     else console.warn("DISPENSE LOTS: ignored unknown movement type", row.type, row.name, row.lot);
   }
 
-  // Deduct previous dispensing records from the same medicine and LOT.
+  // Deduct legacy dispensing records that have not already been written to
+  // VACCINE_MOVEMENT. New dispense records are represented as TYPE=OUT there.
+  const movementDispenseRefs = new Set(
+    rows.filter(x => x.type === "OUT" && x.refNo).map(x => x.refNo)
+  );
   let dispenseRows = [];
   try { dispenseRows = await getValues("INVENTORY_DISPENSE!A:L"); } catch (_) {}
   if (Array.isArray(dispenseRows) && dispenseRows.length > 1) {
@@ -2127,6 +2170,8 @@ async function getAvailableDispenseLots(medicineName) {
     );
     const getDispense = (row, name) => row[dispenseIndex[name]] ?? "";
     for (const row of dispenseRows.slice(1)) {
+      const refNo = cleanText(getDispense(row, "REF_NO"));
+      if (refNo && movementDispenseRefs.has(refNo)) continue;
       const name = cleanText(getDispense(row, "MEDICINE_NAME"));
       const lot = cleanText(getDispense(row, "LOT"));
       if (!lot) continue;
@@ -2271,30 +2316,116 @@ app.post("/api/dispense", requireAuth, async (req, res) => {
     const qrRaw = cleanText(req.body?.qr_raw);
 
     const sheets = await sheetsApi();
-    await sheets.spreadsheets.values.append({
+    const dispenseValues = [[
+      dispenseId,
+      refNo,
+      data.patient_name,
+      data.hn,
+      data.medicine_name,
+      data.dose_count,
+      selectedLot.lot,
+      selectedLot.exp,
+      selectedLot.code,
+      req.user.full_name,
+      now,
+      qrRaw
+    ]];
+
+    // บันทึก movement ออกลง VACCINE_MOVEMENT ตามโครงสร้าง 16 คอลัมน์ที่กำหนด
+    await ensureSheet("VACCINE_MOVEMENT", DISPENSE_MOVEMENT_HEADERS);
+    const movementId = `DSPMOV${Date.now()}`;
+    const movementDate = now.slice(0, 10);
+    const movementValues = [[
+      movementId,                         // MOVEMENT_ID
+      "OUT",                              // TYPE
+      refNo,                              // REF_NO
+      movementDate,                       // DATE
+      selectedLot.code,                   // CODE
+      selectedLot.name || data.medicine_name, // NAME
+      data.dose_count,                    // QTY
+      selectedLot.unit || "DOSE",        // UNIT
+      selectedLot.lot,                    // LOT
+      selectedLot.exp,                    // EXP
+      [data.patient_name, data.hn].filter(Boolean).join(" / "), // TARGET
+      req.user.full_name,                 // USER
+      now,                                // TIME
+      "จ่ายวัคซีน/ยา Dispense",          // REMARK
+      cleanText(req.body?.location),      // Location
+      qrRaw                               // QRCODE
+    ]];
+
+    const movementAppend = await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: "VACCINE_MOVEMENT!A:P",
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: movementValues }
+    });
+    const movementRange = movementAppend.data?.updates?.updatedRange || "";
+    const movementRowsSaved = Number(movementAppend.data?.updates?.updatedRows || 0);
+    if (!movementRange || movementRowsSaved !== 1) {
+      console.error("DISPENSE MOVEMENT APPEND NOT VERIFIED:", {
+        spreadsheetId: SHEET_ID, sheet: "VACCINE_MOVEMENT", movementId,
+        refNo, movementRange, movementRowsSaved
+      });
+      return res.status(502).json({
+        success: false,
+        code: "VACCINE_MOVEMENT_SAVE_NOT_VERIFIED",
+        message: "Google Sheets ยังไม่ยืนยันการบันทึก VACCINE_MOVEMENT กรุณาตรวจสอบชีตก่อนลองบันทึกซ้ำ",
+        movement_id: movementId, ref_no: refNo
+      });
+    }
+
+    // บันทึกประวัติรายละเอียดผู้รับยาใน INVENTORY_DISPENSE ด้วย
+    const appendResult = await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
       range: "INVENTORY_DISPENSE!A:L",
       valueInputOption: "RAW",
-      requestBody: {
-        values: [[
-          dispenseId,
-          refNo,
-          data.patient_name,
-          data.hn,
-          data.medicine_name,
-          data.dose_count,
-          selectedLot.lot,
-          selectedLot.exp,
-          selectedLot.code,
-          req.user.full_name,
-          now,
-          qrRaw
-        ]]
-      }
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: dispenseValues }
+    });
+
+    const savedRange = appendResult.data?.updates?.updatedRange || "";
+    const savedRows = Number(appendResult.data?.updates?.updatedRows || 0);
+    if (!savedRange || savedRows !== 1) {
+      console.error("DISPENSE APPEND NOT VERIFIED:", {
+        spreadsheetId: SHEET_ID,
+        sheet: "INVENTORY_DISPENSE",
+        dispenseId,
+        savedRange,
+        savedRows,
+        movementRange,
+        movementId,
+        note: "VACCINE_MOVEMENT saved; INVENTORY_DISPENSE not verified"
+      });
+      return res.status(502).json({
+        success: false,
+        code: "DISPENSE_SAVE_NOT_VERIFIED",
+        message: "บันทึก VACCINE_MOVEMENT แล้ว แต่ Google Sheets ยังไม่ยืนยัน INVENTORY_DISPENSE กรุณาตรวจสอบทั้งสองชีตก่อนลองบันทึกซ้ำ",
+        movement_id: movementId,
+        dispense_id: dispenseId,
+        ref_no: refNo
+      });
+    }
+
+    console.log("DISPENSE SAVED:", {
+      spreadsheetId: SHEET_ID,
+      sheet: "VACCINE_MOVEMENT + INVENTORY_DISPENSE",
+      movementId,
+      movementRange,
+      movementRowsSaved,
+      dispenseId,
+      refNo,
+      savedRange,
+      savedRows
     });
 
     return res.json({
       success: true,
+      saved_sheet: "VACCINE_MOVEMENT + INVENTORY_DISPENSE",
+      movement_id: movementId,
+      movement_range: movementRange,
+      saved_range: savedRange,
       dispense_id: dispenseId,
       ref_no: refNo,
       data: {

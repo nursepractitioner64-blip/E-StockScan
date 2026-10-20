@@ -1,7 +1,7 @@
 const { GoogleSpreadsheet } = require("google-spreadsheet");
 const creds = require("./service-account.json");
 
-const SHEET_ID = "1-c2zcJPV4KNxZSuOWoYlbs3vqyVW08HUogUJWW0eN9w";
+const SHEET_ID = "1BYT5Qr65c-t72SWBP4h6vaxj8SxB7Vr8qeU-rQHB0S4";
 
 async function getDoc() {
   const doc = new GoogleSpreadsheet(SHEET_ID);
